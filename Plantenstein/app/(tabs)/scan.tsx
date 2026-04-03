@@ -96,8 +96,10 @@ export default function ScanScreen() {
   return (
     <View style={styles.container}>
       {/* Live Camera View */}
-      <CameraView style={styles.cameraView} facing="back" ref={cameraRef}>
-        
+      <CameraView style={styles.cameraView} facing="back" ref={cameraRef} />
+
+      {/* Overlays (No longer children of CameraView to fix Expo warning) */}
+      <View style={StyleSheet.absoluteFill} pointerEvents="box-none">
         {/* Header Overlay */}
         <View style={styles.headerOverlay}>
           <View style={styles.headerTitle}>
@@ -160,7 +162,7 @@ export default function ScanScreen() {
             disabled={isUploading}
           />
         </View>
-      </CameraView>
+      </View>
     </View>
   );
 }

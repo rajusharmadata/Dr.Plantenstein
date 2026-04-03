@@ -1,0 +1,28 @@
+{
+  "welcome": "नमस्ते किसान 👋",
+  "welcomeSubtitle": "आपकी फसल आज जीवंत दिख रही है।",
+  "scanYourCrop": "अपनी फसल को स्कैन करें",
+  "scanSubtitle": "सेकंडों में AI-आधारित निदान",
+  "uploadGallery": "गैलरी से अपलोड करें",
+  "viewPastReports": "पुरानी रिपोर्ट देखें",
+  "tipsTitle": "स्वस्थ फसलों के लिए सुझाव",
+  "seeAll": "सभी देखें",
+  "recentReports": "हालिया रिपोर्ट",
+  "analyzedAgo": "{{count}} दिन पहले विश्लेषण किया गया",
+  "detected": "रोग मिला",
+  "healthy": "स्वस्थ",
+  "home": "होम",
+  "community": "समुदाय",
+  "scan": "स्कैन",
+  "history": "इतिहास",
+  "profile": "प्रोफ़ाइल",
+  "profilePage": {
+    "account_support": "खाता और समर्थन",
+    "scan_history": "स्कैन इतिहास",
+    "contact_experts": "विशेषज्ञों से संपर्क करें",
+    "about_us": "हमारे बारे में",
+    "customer_care": "ग्राहक सेवा",
+    "logout": "लॉग आउट",
+    "version_info": "संस्करण 2.4.0 (एग्री-डॉक्टर)"
+  }
+}

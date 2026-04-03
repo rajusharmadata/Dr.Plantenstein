@@ -58,6 +58,12 @@
         {
           "locationWhenInUsePermission": "Show your location on your crop health map."
         }
+      ],
+      [
+        "expo-av",
+        {
+          "microphonePermission": "Allow Dr. Planteinstein to listen to your voice questions."
+        }
       ]
     ],
     "experiments": {
@@ -65,7 +71,7 @@
       "reactCompiler": true
     },
     "extra": {
-      "API_BASE_URL": "http://192.168.27.193:3000/api"
+      "API_BASE_URL": "http://192.168.17.17:3000/api"
     }
   }
 }

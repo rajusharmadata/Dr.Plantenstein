@@ -35,4 +35,9 @@ export const TYPOGRAPHY = {
     fontWeight: "600" as const,
     color: "#526D57",
   },
+  caption: {
+    fontSize: 12,
+    fontWeight: "600" as const,
+    color: "#99AFA0",
+  },
 };

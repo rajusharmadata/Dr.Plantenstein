@@ -3,13 +3,14 @@ import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
   ActivityIndicator, RefreshControl
 } from "react-native";
+import { Image } from "expo-image";
 import { COLORS, SPACING, RADIUS } from "../../src/constants/theme";
 import { TYPOGRAPHY } from "../../src/constants/typography";
 import { Badge, BadgeType } from "../../src/components/Badge";
 import { Card } from "../../src/components/Card";
 import { FontAwesome5 } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
-import { getRecords, AnalysisResult } from "../../src/services/api";
+import { getRecords, AnalysisResult, formatImageUrl } from "../../src/services/api";
 
 const STATUS_TABS = [
   { label: "All Records", value: undefined },
@@ -132,8 +133,13 @@ export default function History() {
             <TouchableOpacity key={record._id} activeOpacity={0.8} onPress={() => handleRecordPress(record)}>
               <Card style={styles.recordCard}>
                 <View style={styles.recordContent}>
-                  {/* Image */}
-                  <View style={[styles.imagePlaceholder, { backgroundColor: COLORS.brandLight }]}>
+                  <View style={styles.imageContainer}>
+                    <Image 
+                      source={{ uri: formatImageUrl(record.imageUrl) }} 
+                      style={styles.recordImage}
+                      contentFit="cover"
+                      transition={300}
+                    />
                     <View style={styles.badgeWrapper}>
                       <Badge type={record.status as BadgeType} text={record.status} />
                     </View>
@@ -200,14 +206,32 @@ const styles = StyleSheet.create({
   listContainer: { gap: SPACING.sm, marginBottom: SPACING.xl },
   recordCard: { padding: SPACING.sm },
   recordContent: { flexDirection: "row", alignItems: "center" },
-  imagePlaceholder: { width: 80, height: 80, borderRadius: RADIUS.sm, overflow: "hidden", marginRight: SPACING.md, justifyContent: "flex-start", alignItems: "flex-start", padding: 4 },
-  badgeWrapper: { transform: [{ scale: 0.85 }] },
+  imageContainer: { 
+    width: 80, 
+    height: 80, 
+    borderRadius: RADIUS.sm, 
+    overflow: "hidden", 
+    marginRight: SPACING.md, 
+    backgroundColor: COLORS.brandLight,
+    position: "relative" 
+  },
+  recordImage: {
+    width: "100%",
+    height: "100%"
+  },
+  badgeWrapper: { 
+    position: "absolute",
+    top: 4,
+    left: 4,
+    transform: [{ scale: 0.75 }],
+    transformOrigin: "left top" 
+  },
   recordDetails: { flex: 1 },
-  recordTitle: { ...TYPOGRAPHY.bodySemibold, marginBottom: 2 },
-  recordCrop: { ...TYPOGRAPHY.tiny, marginBottom: SPACING.xs },
+  recordTitle: { ...TYPOGRAPHY.bodySemibold, marginBottom: 2, color: COLORS.textPrimary },
+  recordCrop: { ...TYPOGRAPHY.tiny, marginBottom: SPACING.xs, color: COLORS.textSecondary },
   dateRow: { flexDirection: "row", alignItems: "center", gap: 4, marginBottom: 2 },
-  recordDate: { ...TYPOGRAPHY.tiny, color: COLORS.textSecondary },
-  infoCard: { alignItems: "center", backgroundColor: COLORS.brandLight, paddingVertical: SPACING.lg },
+  recordDate: { ...TYPOGRAPHY.tiny, color: COLORS.inactive },
+  infoCard: { alignItems: "center", backgroundColor: COLORS.brandLight, paddingVertical: SPACING.lg, borderRadius: RADIUS.lg },
   infoTitle: { ...TYPOGRAPHY.bodySemibold, color: COLORS.primary, marginBottom: 4 },
   infoSubtitle: { ...TYPOGRAPHY.tiny, color: COLORS.textPrimary },
 });
