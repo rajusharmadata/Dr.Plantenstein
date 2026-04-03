@@ -8,6 +8,8 @@ const userSchema = new mongoose.Schema(
 
     // Profile fields (required after OTP verification).
     displayName: { type: String, required: false, trim: true },
+    phoneNumber: { type: String, required: false, trim: true },
+    isVerified: { type: Boolean, default: true },
     username: {
       type: String,
       required: false,

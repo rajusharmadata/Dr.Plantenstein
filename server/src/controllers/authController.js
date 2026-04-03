@@ -285,5 +285,39 @@ const completeProfile = async (req, res) => {
   }
 };
 
-module.exports = { sendEmailOtp, verifyEmailOtp, completeProfile };
+/**
+ * GET /api/auth/profile
+ * Header: Authorization: Bearer <token>
+ */
+const getProfile = async (req, res) => {
+  try {
+    const userId = req.user?.userId;
+    if (!userId) {
+      return res.status(401).json({ success: false, message: "Unauthorized." });
+    }
+
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({ success: false, message: "User not found." });
+    }
+
+    return res.status(200).json({
+      success: true,
+      user: {
+        id: user._id.toString(),
+        email: user.email,
+        displayName: user.displayName || "",
+        username: user.username || "",
+        phoneNumber: user.phoneNumber || "",
+        isVerified: user.isVerified || false,
+        emailVerified: user.emailVerified,
+      },
+    });
+  } catch (error) {
+    console.error("getProfile error:", error);
+    return res.status(500).json({ success: false, message: "Failed to fetch profile." });
+  }
+};
+
+module.exports = { sendEmailOtp, verifyEmailOtp, completeProfile, getProfile };
 

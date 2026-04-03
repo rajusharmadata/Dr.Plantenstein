@@ -1,8 +1,10 @@
 import React from "react";
-import { View, Text, StyleSheet } from "react-native";
+import { View, Text, StyleSheet, TouchableOpacity } from "react-native";
 import { COLORS, SPACING } from "../constants/theme";
 import { TYPOGRAPHY } from "../constants/typography";
 import { FontAwesome5 } from "@expo/vector-icons";
+import { useTranslation } from "react-i18next";
+import * as SecureStore from "expo-secure-store";
 
 interface HeaderProps {
   title?: string;
@@ -10,6 +12,14 @@ interface HeaderProps {
 }
 
 export function Header({ title = "Dr. Planteinstein", showLanguageToggle = true }: HeaderProps) {
+  const { i18n } = useTranslation();
+
+  const toggleLanguage = async () => {
+    const nextLang = i18n.language === "en" ? "hi" : "en";
+    await i18n.changeLanguage(nextLang);
+    await SecureStore.setItemAsync("user-language", nextLang);
+  };
+
   return (
     <View style={styles.container}>
       <View style={styles.leftSection}>
@@ -17,7 +27,11 @@ export function Header({ title = "Dr. Planteinstein", showLanguageToggle = true 
         <Text style={styles.title}>{title}</Text>
       </View>
       {showLanguageToggle && (
-        <Text style={styles.languageToggle}>HI/EN</Text>
+        <TouchableOpacity onPress={toggleLanguage} activeOpacity={0.7}>
+          <Text style={styles.languageToggle}>
+            {i18n.language === "en" ? "HI" : "EN"} / {i18n.language === "en" ? "EN" : "HI"}
+          </Text>
+        </TouchableOpacity>
       )}
     </View>
   );
@@ -29,8 +43,9 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     alignItems: "center",
     paddingHorizontal: SPACING.md,
-    paddingVertical: SPACING.md,
-    backgroundColor: COLORS.background, // Match background so it blends
+    paddingTop: 44, // Added padding to push the header down
+    paddingBottom: SPACING.md,
+    backgroundColor: COLORS.background,
   },
   leftSection: {
     flexDirection: "row",

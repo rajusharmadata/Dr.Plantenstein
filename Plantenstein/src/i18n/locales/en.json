@@ -1,0 +1,28 @@
+{
+  "welcome": "Hello Farmer 👋",
+  "welcomeSubtitle": "Your crops are looking vibrant today.",
+  "scanYourCrop": "Scan Your Crop",
+  "scanSubtitle": "AI-powered diagnosis in seconds",
+  "uploadGallery": "Upload from Gallery",
+  "viewPastReports": "View Past Reports",
+  "tipsTitle": "Tips for healthy crops",
+  "seeAll": "SEE ALL",
+  "recentReports": "Recent Reports",
+  "analyzedAgo": "Analyzed {{count}} days ago",
+  "detected": "Detected",
+  "healthy": "Healthy",
+  "home": "Home",
+  "community": "Community",
+  "scan": "Scan",
+  "history": "History",
+  "profile": "Profile",
+  "profilePage": {
+    "account_support": "ACCOUNT & SUPPORT",
+    "scan_history": "Scan History",
+    "contact_experts": "Contact Experts",
+    "about_us": "About Us",
+    "customer_care": "Customer Care",
+    "logout": "Logout",
+    "version_info": "Version 2.4.0 (Agri-Doctor)"
+  }
+}

@@ -1,23 +1,38 @@
-import React, { useEffect, useState } from "react";
-import { View, Text, StyleSheet, ScrollView, Image, ActivityIndicator } from "react-native";
+import React, { useEffect, useState, useRef } from "react";
+import { 
+  View, Text, StyleSheet, ScrollView, Image, ActivityIndicator, 
+  TouchableOpacity, TextInput, KeyboardAvoidingView, Platform, Animated
+} from "react-native";
 import { COLORS, RADIUS, SPACING } from "../src/constants/theme";
 import { TYPOGRAPHY } from "../src/constants/typography";
 import { Badge } from "../src/components/Badge";
-import { Card } from "../src/components/Card";
-import { Button } from "../src/components/Button";
-import { FontAwesome5 } from "@expo/vector-icons";
+import { FontAwesome5, Ionicons } from "@expo/vector-icons";
 import { useRouter, useLocalSearchParams } from "expo-router";
 import { Header } from "../src/components/Header";
-import { getRecordById, AnalysisResult } from "../src/services/api";
+import { getRecordById, sendChatMessage, sendVoiceChat, AnalysisResult, formatImageUrl } from "../src/services/api";
 import type { BadgeType } from "../src/components/Badge";
+
+// Voice imports (Speech removed)
+import { Audio } from "expo-av";
+import * as Haptics from "expo-haptics";
 
 export default function ResultsScreen() {
   const router = useRouter();
   const { id, uri } = useLocalSearchParams<{ id?: string; uri?: string }>();
+  const scrollRef = useRef<ScrollView>(null);
+  const pulseAnim = useRef(new Animated.Value(1)).current;
 
   const [record, setRecord] = useState<AnalysisResult | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  
+  // Chat State
+  const [inputMessage, setInputMessage] = useState("");
+  const [isSending, setIsSending] = useState(false);
+  
+  // Voice State (Now strictly input)
+  const [recordingObject, setRecordingObject] = useState<Audio.Recording | null>(null);
+  const [isRecording, setIsRecording] = useState(false);
 
   useEffect(() => {
     if (!id) {
@@ -25,23 +40,123 @@ export default function ResultsScreen() {
       setLoading(false);
       return;
     }
-    (async () => {
-      try {
-        const data = await getRecordById(id);
-        setRecord(data);
-      } catch (err: any) {
-        setError(err.message || "Failed to load result.");
-      } finally {
-        setLoading(false);
-      }
-    })();
+    fetchRecord();
+
+    return () => {
+       if (recordingObject) {
+         recordingObject.stopAndUnloadAsync().catch(() => {});
+       }
+    };
   }, [id]);
+
+  const fetchRecord = async () => {
+    try {
+      const data = await getRecordById(id!);
+      setRecord(data);
+    } catch (err: any) {
+      setError(err.message || "Failed to load result.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const startPulse = () => {
+    Animated.loop(
+      Animated.sequence([
+        Animated.timing(pulseAnim, { toValue: 1.2, duration: 500, useNativeDriver: true }),
+        Animated.timing(pulseAnim, { toValue: 1, duration: 500, useNativeDriver: true })
+      ])
+    ).start();
+  };
+
+  const startRecording = async () => {
+    if (isRecording || recordingObject) return;
+
+    try {
+      const permission = await Audio.requestPermissionsAsync();
+      if (permission.status !== "granted") return;
+
+      await Audio.setAudioModeAsync({
+        allowsRecordingIOS: true,
+        playsInSilentModeIOS: true,
+      });
+
+      const { recording } = await Audio.Recording.createAsync(
+        Audio.RecordingOptionsPresets.HIGH_QUALITY
+      );
+      
+      setRecordingObject(recording);
+      setIsRecording(true);
+      startPulse();
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    } catch (err) {
+      console.error("Failed to start recording:", err);
+      setIsRecording(false);
+    }
+  };
+
+  const stopRecording = async () => {
+    if (!recordingObject) return;
+
+    try {
+      setIsRecording(false);
+      pulseAnim.setValue(1);
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      
+      const currentRecording = recordingObject;
+      setRecordingObject(null);
+
+      await currentRecording.stopAndUnloadAsync();
+      const uri = currentRecording.getURI();
+
+      if (uri) {
+        setIsSending(true);
+        const result = await sendVoiceChat(id!, uri);
+        
+        if (record) {
+          setRecord({
+            ...record,
+            chatMessages: [...record.chatMessages, result.userMessage, result.aiResponse]
+          });
+        }
+      }
+    } catch (err) {
+      console.error("Failed to stop recording:", err);
+    } finally {
+      setIsSending(false);
+    }
+  };
+
+  const handleSendMessage = async () => {
+    if (!inputMessage.trim() || isSending || !id) return;
+
+    const userText = inputMessage.trim();
+    setInputMessage("");
+    setIsSending(true);
+
+    try {
+      const result = await sendChatMessage(id!, userText);
+      
+      if (record) {
+        setRecord({
+          ...record,
+          chatMessages: [...record.chatMessages, result.userMessage, result.aiResponse]
+        });
+      }
+      
+      setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 100);
+    } catch (err: any) {
+      console.error("Failed to send message:", err);
+    } finally {
+      setIsSending(false);
+    }
+  };
 
   if (loading) {
     return (
       <View style={styles.centered}>
         <ActivityIndicator size="large" color={COLORS.primary} />
-        <Text style={styles.loadingText}>Loading results...</Text>
+        <Text style={styles.loadingText}>Dr. Planteinstein is opening your file...</Text>
       </View>
     );
   }
@@ -51,154 +166,244 @@ export default function ResultsScreen() {
       <View style={styles.centered}>
         <FontAwesome5 name="exclamation-circle" size={40} color={COLORS.warningText} />
         <Text style={styles.errorText}>{error ?? "Something went wrong."}</Text>
-        <Button title="Go Back" onPress={() => router.back()} variant="outline" style={{ marginTop: SPACING.md }} />
+        <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
+          <Text style={styles.backButtonText}>Go Back</Text>
+        </TouchableOpacity>
       </View>
     );
   }
 
-  return (
-    <View style={styles.container}>
-      <Header />
+  const vitalityValue = record.status === "healthy" ? 95 : record.status === "warning" ? 65 : 30;
 
-      <ScrollView style={styles.content} contentContainerStyle={styles.scrollContent}>
-        {/* Main Image Card */}
-        <View style={styles.imageCard}>
+  return (
+    <KeyboardAvoidingView 
+      style={styles.container} 
+      behavior={Platform.OS === "ios" ? "padding" : "height"}
+      keyboardVerticalOffset={Platform.OS === "ios" ? 0 : 20}
+    >
+      <View style={styles.headerArea}>
+         <Header />
+      </View>
+
+      <ScrollView 
+        ref={scrollRef}
+        style={styles.chatContainer} 
+        contentContainerStyle={styles.chatScrollContent}
+        showsVerticalScrollIndicator={false}
+        onContentSizeChange={() => scrollRef.current?.scrollToEnd({ animated: true })}
+      >
+        {/* Initial Greeting */}
+        <View style={styles.messageRow}>
+          <View style={styles.doctorAvatar}>
+            <Image 
+               source={{ uri: "https://cdn-icons-png.flaticon.com/512/3063/3063822.png" }} 
+               style={styles.avatarImage} 
+            />
+          </View>
+          <View style={styles.doctorBubble}>
+            <Text style={styles.doctorText}>
+              I've analyzed your crop scan. Here's what I found.
+            </Text>
+          </View>
+        </View>
+
+        {/* Diagnosis Card */}
+        <View style={styles.diagnosisCard}>
           <Image
-            source={{ uri: uri ?? record.imageUrl }}
+            source={{ uri: uri ?? formatImageUrl(record.imageUrl) }}
             style={styles.leafImage}
             resizeMode="cover"
           />
-          <View style={styles.badgeTopLeft}>
-            <Badge type={record.status as BadgeType} text={record.status} />
+          <View style={styles.badgeLabel}>
+             <Badge type={record.status as BadgeType} text={record.status.toUpperCase()} />
           </View>
-          <View style={styles.confidenceOverlay}>
-            <Text style={styles.confidenceLabel}>CONFIDENCE</Text>
-            <Text style={styles.confidenceValue}>{record.confidence}%</Text>
+
+          <View style={styles.cardInfo}>
+            <View style={styles.infoRow}>
+              <View>
+                <Text style={styles.label}>DIAGNOSIS</Text>
+                <Text style={styles.diagnosisTitle}>{record.title}</Text>
+              </View>
+              <View style={styles.confidenceInfo}>
+                <Text style={styles.label}>CONFIDENCE</Text>
+                <Text style={styles.confidenceText}>{record.confidence}%</Text>
+              </View>
+            </View>
+
+            <View style={styles.vitalityContainer}>
+              <View style={styles.vitalityHeader}>
+                 <Text style={styles.label}>PLANT VITALITY</Text>
+                 <Text style={styles.vitalityStatus}>{vitalityValue > 50 ? "GOOD" : "LOW"}</Text>
+              </View>
+              <View style={styles.vitalityBarBackground}>
+                 <View style={[styles.vitalityBarFilled, { width: `${vitalityValue}%` }]} />
+              </View>
+            </View>
           </View>
         </View>
 
-        {/* Title and Description */}
-        <Text style={styles.title}>{record.title}</Text>
-        <Text style={styles.cropLabel}>{record.cropName} · {record.cropScientific}</Text>
-        <Text style={styles.description}>{record.analysis.description}</Text>
-
-        {/* Location (if available) */}
-        {record.location?.latitude && (
-          <Card style={styles.locationCard}>
-            <View style={styles.cardHeader}>
-              <FontAwesome5 name="map-marker-alt" size={14} color={COLORS.primary} style={{ marginRight: SPACING.sm }} />
-              <Text style={styles.cardTitle}>Location</Text>
-            </View>
-            <Text style={styles.cardDesc}>
-              {record.location.address || `${record.location.latitude.toFixed(4)}, ${record.location.longitude.toFixed(4)}`}
+        {/* Initial AI Result Bubble */}
+        <View style={styles.messageRow}>
+          <View style={styles.doctorAvatar}>
+            <Image 
+               source={{ uri: "https://cdn-icons-png.flaticon.com/512/3063/3063822.png" }} 
+               style={styles.avatarImage} 
+            />
+          </View>
+          <View style={styles.doctorBubble}>
+            <Text style={styles.doctorText}>
+              {record.analysis.description}
+              {"\n\n"}
+              {record.analysis.remedies}
             </Text>
-          </Card>
+          </View>
+        </View>
+
+        {/* Persistent Chat History */}
+        {record.chatMessages.map((msg, index) => (
+          <View 
+            key={index} 
+            style={[
+              styles.messageRow, 
+              msg.role === "user" ? styles.userRow : styles.doctorRow
+            ]}
+          >
+            {msg.role === "model" && (
+              <View style={styles.doctorAvatar}>
+                <Image 
+                  source={{ uri: "https://cdn-icons-png.flaticon.com/512/3063/3063822.png" }} 
+                  style={styles.avatarImage} 
+                />
+              </View>
+            )}
+            <View style={[
+              msg.role === "user" ? styles.userBubble : styles.doctorBubble
+            ]}>
+              <Text style={[
+                msg.role === "user" ? styles.userText : styles.doctorText
+              ]}>
+                {msg.content}
+              </Text>
+            </View>
+          </View>
+        ))}
+
+        {/* Thinking State */}
+        {isSending && (
+          <View style={styles.messageRow}>
+            <View style={styles.doctorAvatar}>
+               <ActivityIndicator size="small" color={COLORS.primary} />
+            </View>
+            <View style={styles.doctorBubble}>
+              <Text style={[styles.doctorText, { fontStyle: "italic" }]}>
+                Dr. Planteinstein is thinking...
+              </Text>
+            </View>
+          </View>
         )}
 
-        {/* Organic Remedies */}
-        <Card style={styles.infoCard}>
-          <View style={styles.cardHeader}>
-            <View style={styles.iconContainer}>
-              <FontAwesome5 name="medkit" size={16} color={COLORS.primary} />
-            </View>
-            <Text style={styles.cardTitle}>Organic Remedies</Text>
-          </View>
-          <Text style={styles.cardDesc}>{record.analysis.remedies}</Text>
-        </Card>
-
-        {/* Prevention */}
-        <Card style={styles.infoCard}>
-          <View style={styles.cardHeader}>
-            <View style={styles.iconContainerPrevention}>
-              <FontAwesome5 name="shield-alt" size={16} color={COLORS.primary} />
-            </View>
-            <Text style={styles.cardTitle}>Prevention</Text>
-          </View>
-          <View style={styles.bulletList}>
-            {record.analysis.prevention.map((tip, i) => (
-              <View key={i} style={styles.bulletRow}>
-                <FontAwesome5 name="check-circle" size={12} color={COLORS.primary} />
-                <Text style={styles.bulletText}>{tip}</Text>
-              </View>
-            ))}
-          </View>
-        </Card>
-
-        {/* Soil Health */}
-        <Card style={styles.soilCard}>
-          <View style={styles.cardHeader}>
-            <View style={styles.iconContainerSoil}>
-              <FontAwesome5 name="seedling" size={16} color={COLORS.warningText} />
-            </View>
-            <Text style={styles.cardTitle}>Soil Health</Text>
-          </View>
-          <Text style={styles.cardDesc}>{record.analysis.soilHealth}</Text>
-        </Card>
-
-        {/* Action Buttons */}
-        <View style={styles.actionsContainer}>
-          <Button
-            title="Scan Another"
-            icon="expand-arrows-alt"
-            onPress={() => router.push("/(tabs)/scan")}
-            style={{ marginBottom: SPACING.md }}
-          />
-          <View style={styles.secondaryActions}>
-            <Button title="Save Report" variant="secondary" icon="save" style={styles.flexButton} onPress={() => {}} />
-            <Button title="Share" variant="secondary" icon="share-alt" style={styles.flexButton} onPress={() => {}} />
-          </View>
-        </View>
+        {/* Suggestion Chips */}
+        {record.chatMessages.length === 0 && (
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipsScroll}>
+            <TouchableOpacity onPress={() => setInputMessage("Tell me more about organic remedies.")} style={styles.chip}>
+              <Text style={styles.chipText}>Organic remedies</Text>
+            </TouchableOpacity>
+            <TouchableOpacity onPress={() => setInputMessage("What are the next steps for my crop?")} style={styles.chip}>
+              <Text style={styles.chipText}>Next steps</Text>
+            </TouchableOpacity>
+            <TouchableOpacity onPress={() => setInputMessage("How can I prevent this disease in the future?")} style={styles.chip}>
+              <Text style={styles.chipText}>How to prevent</Text>
+            </TouchableOpacity>
+          </ScrollView>
+        )}
       </ScrollView>
 
-      {/* Dummy Tab Bar */}
-      <View style={styles.dummyTabBar}>
-        <FontAwesome5 name="home" size={20} color={COLORS.inactive} />
-        <FontAwesome5 name="users" size={20} color={COLORS.inactive} />
-        <View style={styles.dummyScanActive}>
-          <FontAwesome5 name="expand" size={20} color={COLORS.white} />
+      {/* Chat Input Bar */}
+      <View style={styles.bottomBar}>
+        <View style={styles.inputContainer}>
+          <TextInput 
+            placeholder="Ask Dr. Planteinstein..." 
+            style={styles.input}
+            placeholderTextColor={COLORS.inactive}
+            value={inputMessage}
+            onChangeText={setInputMessage}
+            multiline
+            maxLength={500}
+            editable={!isSending}
+          />
+          <Animated.View style={{ transform: [{ scale: pulseAnim }] }}>
+            <TouchableOpacity 
+              onPressIn={startRecording}
+              onPressOut={stopRecording}
+              style={[styles.micButton, isRecording && styles.micButtonActive]}
+            >
+               <Ionicons name={isRecording ? "mic" : "mic-outline"} size={22} color={isRecording ? COLORS.white : COLORS.inactive} />
+            </TouchableOpacity>
+          </Animated.View>
         </View>
-        <FontAwesome5 name="history" size={20} color={COLORS.inactive} />
-        <FontAwesome5 name="user" size={20} color={COLORS.inactive} />
+        <TouchableOpacity 
+          style={[styles.sendButton, (!inputMessage.trim() || isSending) && { opacity: 0.5 }]} 
+          onPress={handleSendMessage}
+          disabled={!inputMessage.trim() || isSending}
+        >
+           <Ionicons name="send" size={20} color={COLORS.white} />
+        </TouchableOpacity>
       </View>
-    </View>
+    </KeyboardAvoidingView>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: COLORS.background },
-  centered: { flex: 1, justifyContent: "center", alignItems: "center", padding: SPACING.lg, backgroundColor: COLORS.background },
+  headerArea: { paddingRight: SPACING.md },
+  centered: { flex: 1, justifyContent: "center", alignItems: "center", backgroundColor: COLORS.background },
   loadingText: { ...TYPOGRAPHY.body, marginTop: SPACING.md, color: COLORS.textSecondary },
-  errorText: { ...TYPOGRAPHY.body, textAlign: "center", marginTop: SPACING.md, color: COLORS.warningText },
-  content: { flex: 1 },
-  scrollContent: { paddingHorizontal: SPACING.md, paddingBottom: SPACING.xxl },
-  imageCard: { width: "100%", aspectRatio: 4 / 3, marginBottom: SPACING.lg, borderRadius: RADIUS.lg, overflow: "hidden" },
-  leafImage: { flex: 1 },
-  badgeTopLeft: { position: "absolute", top: SPACING.sm, left: SPACING.sm },
-  confidenceOverlay: {
-    position: "absolute", bottom: SPACING.sm, right: SPACING.sm,
-    backgroundColor: "rgba(255,255,255,0.88)", paddingHorizontal: SPACING.md,
-    paddingVertical: SPACING.sm, borderRadius: RADIUS.md, alignItems: "center",
-  },
-  confidenceLabel: { ...TYPOGRAPHY.tiny, color: COLORS.primary, fontWeight: "800" },
-  confidenceValue: { ...TYPOGRAPHY.h2, color: COLORS.textPrimary },
-  title: { ...TYPOGRAPHY.h1, marginBottom: 2 },
-  cropLabel: { ...TYPOGRAPHY.small, color: COLORS.primary, fontWeight: "600", marginBottom: SPACING.xs },
-  description: { ...TYPOGRAPHY.body, marginBottom: SPACING.lg },
-  locationCard: { marginBottom: SPACING.md, backgroundColor: COLORS.infoBg },
-  infoCard: { marginBottom: SPACING.md },
-  soilCard: { marginBottom: SPACING.xl, backgroundColor: COLORS.soilBg },
-  cardHeader: { flexDirection: "row", alignItems: "center", marginBottom: SPACING.sm },
-  iconContainer: { backgroundColor: COLORS.healthyBg, padding: 6, borderRadius: RADIUS.sm, marginRight: 8 },
-  iconContainerPrevention: { backgroundColor: COLORS.brandLight, padding: 6, borderRadius: RADIUS.sm, marginRight: 8 },
-  iconContainerSoil: { backgroundColor: "rgba(255,255,255,0.5)", padding: 6, borderRadius: RADIUS.sm, marginRight: 8 },
-  cardTitle: { ...TYPOGRAPHY.bodySemibold },
-  cardDesc: { ...TYPOGRAPHY.small },
-  bulletList: { marginLeft: 4, gap: 8 },
-  bulletRow: { flexDirection: "row", alignItems: "center", gap: 8 },
-  bulletText: { ...TYPOGRAPHY.small },
-  actionsContainer: { marginTop: SPACING.md },
-  secondaryActions: { flexDirection: "row", gap: SPACING.md },
-  flexButton: { flex: 1 },
-  dummyTabBar: { flexDirection: "row", justifyContent: "space-around", alignItems: "center", height: 70, backgroundColor: COLORS.background, paddingBottom: SPACING.md },
-  dummyScanActive: { backgroundColor: COLORS.primary, width: 60, height: 60, borderRadius: RADIUS.pill, justifyContent: "center", alignItems: "center", marginBottom: 20 },
+  errorText: { ...TYPOGRAPHY.body, textAlign: "center", marginTop: SPACING.md, marginBottom: SPACING.lg, color: COLORS.warningText },
+  backButton: { backgroundColor: COLORS.primary, paddingHorizontal: SPACING.lg, paddingVertical: SPACING.sm, borderRadius: RADIUS.md },
+  backButtonText: { color: COLORS.white, fontWeight: "600" },
+
+  chatContainer: { flex: 1 },
+  chatScrollContent: { padding: SPACING.md, paddingBottom: SPACING.xxl },
+
+  messageRow: { flexDirection: "row", marginBottom: SPACING.lg, alignItems: "flex-end" },
+  userRow: { justifyContent: "flex-end" },
+  doctorRow: { justifyContent: "flex-start" },
+  
+  doctorAvatar: { width: 36, height: 36, borderRadius: 18, backgroundColor: COLORS.healthyBg, marginRight: SPACING.sm, justifyContent: "center", alignItems: "center", overflow: "hidden" },
+  avatarImage: { width: "100%", height: "100%" },
+  
+  doctorBubble: { maxWidth: "80%", backgroundColor: "#F4F7EF", padding: SPACING.md, borderRadius: RADIUS.lg, borderBottomLeftRadius: 0 },
+  userBubble: { maxWidth: "80%", backgroundColor: COLORS.primary, padding: SPACING.md, borderRadius: RADIUS.lg, borderBottomRightRadius: 0 },
+  
+  doctorText: { ...TYPOGRAPHY.body, color: "#3E4438", lineHeight: 22 },
+  userText: { ...TYPOGRAPHY.body, color: COLORS.white, lineHeight: 22 },
+
+  diagnosisCard: { backgroundColor: "#EDF2E6", borderRadius: RADIUS.xl, overflow: "hidden", marginBottom: SPACING.lg },
+  leafImage: { width: "100%", height: 220 },
+  badgeLabel: { position: "absolute", top: SPACING.md, right: SPACING.md },
+
+  cardInfo: { padding: SPACING.lg },
+  infoRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
+  label: { ...TYPOGRAPHY.tiny, color: "#78876F", fontWeight: "bold", letterSpacing: 1 },
+  diagnosisTitle: { ...TYPOGRAPHY.h2, color: "#1A2016", marginTop: 4 },
+  confidenceInfo: { alignItems: "flex-end" },
+  confidenceText: { ...TYPOGRAPHY.h1, color: COLORS.primary, marginTop: 4 },
+
+  vitalityContainer: { marginTop: SPACING.md },
+  vitalityHeader: { flexDirection: "row", justifyContent: "space-between", marginBottom: 6 },
+  vitalityStatus: { ...TYPOGRAPHY.tiny, color: "#78876F", fontWeight: "bold" },
+  vitalityBarBackground: { height: 8, backgroundColor: "#D8E2CE", borderRadius: 4, overflow: "hidden" },
+  vitalityBarFilled: { height: "100%", backgroundColor: COLORS.primary, borderRadius: 4 },
+
+  chipsScroll: { marginHorizontal: -SPACING.md, paddingHorizontal: SPACING.md, marginBottom: SPACING.md },
+  chip: { backgroundColor: "#E6EEE1", paddingHorizontal: SPACING.md, paddingVertical: 8, borderRadius: RADIUS.pill, marginRight: 8, borderWidth: 1, borderColor: "#D5DEC9" },
+  chipText: { ...TYPOGRAPHY.small, color: COLORS.primary, fontWeight: "600" },
+
+  bottomBar: { flexDirection: "row", alignItems: "center", padding: SPACING.sm, paddingHorizontal: SPACING.md, borderTopWidth: 1, borderTopColor: "#EBF0E5", backgroundColor: COLORS.background },
+  inputContainer: { flex: 1, flexDirection: "row", backgroundColor: COLORS.white, borderRadius: RADIUS.pill, paddingHorizontal: SPACING.md, minHeight: 46, maxHeight: 100, alignItems: "center", marginRight: SPACING.sm, borderWidth: 1, borderColor: "#E0E6DA" },
+  input: { flex: 1, ...TYPOGRAPHY.body, color: COLORS.textPrimary, paddingVertical: 8 },
+  micButton: { width: 36, height: 36, borderRadius: 18, justifyContent: "center", alignItems: "center" },
+  micButtonActive: { backgroundColor: COLORS.primary },
+  sendButton: { width: 44, height: 44, borderRadius: 22, backgroundColor: COLORS.primary, justifyContent: "center", alignItems: "center" },
 });
+

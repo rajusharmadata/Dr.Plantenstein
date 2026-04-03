@@ -1,4 +1,4 @@
-export const COLORS = {
+const COLORS = {
   background: "#F2F5E9",
   cardBackground: "#FAFBFA",
   primary: "#1C6B38", // Deep forest green
@@ -22,7 +22,7 @@ export const COLORS = {
   soilBg: "#F2EBE5",
 };
 
-export const SPACING = {
+const SPACING = {
   xs: 4,
   sm: 8,
   md: 16,
@@ -31,10 +31,36 @@ export const SPACING = {
   xxl: 40,
 };
 
-export const RADIUS = {
+const RADIUS = {
   sm: 8,
   md: 16,
   lg: 24,
   xl: 32,
   pill: 9999,
+  full: 9999,
 };
+
+const SHADOWS = {
+  sm: {
+    shadowColor: "#000",
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.1,
+    shadowRadius: 3.84,
+    elevation: 2,
+  },
+  md: {
+    shadowColor: "#000",
+    shadowOffset: {
+      width: 0,
+      height: 4,
+    },
+    shadowOpacity: 0.15,
+    shadowRadius: 5.46,
+    elevation: 9,
+  },
+};
+
+export { COLORS, SPACING, RADIUS, SHADOWS };

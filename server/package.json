@@ -17,17 +17,21 @@
   "license": "ISC",
   "type": "commonjs",
   "dependencies": {
+    "@google/genai": "^1.48.0",
+    "@google/generative-ai": "^0.24.1",
+    "axios": "^1.14.0",
     "cloudinary": "^1.41.3",
     "cors": "^2.8.6",
     "dotenv": "^17.4.0",
     "express": "^5.2.1",
+    "form-data": "^4.0.5",
     "helmet": "^8.1.0",
-    "nodemailer": "^6.10.0",
     "jsonwebtoken": "^9.0.2",
     "mongoose": "^9.3.3",
     "morgan": "^1.10.1",
     "multer": "^2.1.1",
     "multer-storage-cloudinary": "^4.0.0",
+    "nodemailer": "^6.10.0",
     "uuid": "^13.0.0"
   },
   "devDependencies": {
