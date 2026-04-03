@@ -5,14 +5,15 @@ const {
   getRecordById,
   deleteRecord,
 } = require("../controllers/recordsController");
+const { requireAuth } = require("../middleware/requireAuth");
 
 /**
  * GET    /api/records        - Get all records (filterable, paginated)
  * GET    /api/records/:id    - Get a single record by ID
  * DELETE /api/records/:id    - Delete a record by ID
  */
-router.get("/", getAllRecords);
-router.get("/:id", getRecordById);
-router.delete("/:id", deleteRecord);
+router.get("/", requireAuth, getAllRecords);
+router.get("/:id", requireAuth, getRecordById);
+router.delete("/:id", requireAuth, deleteRecord);
 
 module.exports = router;

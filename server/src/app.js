@@ -6,6 +6,7 @@ const path = require("path");
 
 const analyzeRoutes = require("./routes/analyzeRoutes");
 const recordsRoutes = require("./routes/recordsRoutes");
+const authRoutes = require("./routes/authRoutes");
 const { errorHandler } = require("./middleware/errorHandler");
 
 const app = express();
@@ -42,6 +43,7 @@ app.get("/api/health", (req, res) => {
 // ─── API Routes ───────────────────────────────────────────────────────────────
 app.use("/api/analyze", analyzeRoutes);
 app.use("/api/records", recordsRoutes);
+app.use("/api/auth", authRoutes);
 
 // ─── 404 Handler ──────────────────────────────────────────────────────────────
 app.use((req, res) => {

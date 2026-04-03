@@ -6,7 +6,10 @@ const Record = require("../models/Record");
  */
 const getAllRecords = async (req, res) => {
   try {
-    const filter = {};
+    const filter = { userId: req.user?.userId };
+    if (!req.user?.userId) {
+      return res.status(401).json({ success: false, message: "Unauthorized." });
+    }
 
     // Filter: ?status=healthy | warning | critical | severe | soil
     if (req.query.status) {
@@ -42,7 +45,10 @@ const getAllRecords = async (req, res) => {
  */
 const getRecordById = async (req, res) => {
   try {
-    const record = await Record.findById(req.params.id);
+    const record = await Record.findOne({
+      _id: req.params.id,
+      userId: req.user?.userId,
+    });
 
     if (!record) {
       return res.status(404).json({ success: false, message: "Record not found." });
@@ -61,7 +67,10 @@ const getRecordById = async (req, res) => {
  */
 const deleteRecord = async (req, res) => {
   try {
-    const record = await Record.findByIdAndDelete(req.params.id);
+    const record = await Record.findOneAndDelete({
+      _id: req.params.id,
+      userId: req.user?.userId,
+    });
 
     if (!record) {
       return res.status(404).json({ success: false, message: "Record not found." });

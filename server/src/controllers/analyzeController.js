@@ -12,6 +12,9 @@ const analyzeLeaf = async (req, res) => {
   let shouldDeleteLocalFile = false;
 
   try {
+    if (!req.user?.userId) {
+      return res.status(401).json({ success: false, message: "Unauthorized." });
+    }
     if (!req.file) {
       return res.status(400).json({ success: false, message: "No image file provided." });
     }
@@ -65,6 +68,7 @@ const analyzeLeaf = async (req, res) => {
       ...diagnosis,
       imageUrl,
       location,
+      userId: req.user?.userId,
     });
 
     res.status(201).json({
