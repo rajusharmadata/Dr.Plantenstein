@@ -19,24 +19,8 @@ const analyzeLeaf = async (req, res) => {
       return res.status(400).json({ success: false, message: "No image file provided." });
     }
 
-    // Default imageUrl uses local static hosting (`server/uploads`).
-    // If Cloudinary is configured, we will overwrite this with Cloudinary's `secure_url`.
-    const localImageUrl = `${req.protocol}://${req.get("host")}/uploads/${req.file.filename}`;
-    let imageUrl = localImageUrl;
-
-    // Parse optional location from body
-    const location = req.body.latitude && req.body.longitude
-      ? {
-          latitude: parseFloat(req.body.latitude),
-          longitude: parseFloat(req.body.longitude),
-          address: req.body.address || "",
-        }
-      : undefined;
-
-    // Run the analysis engine
-    const diagnosis = await analyzeImage(localFilePath);
-
-    // Upload to Cloudinary (if configured) and store the returned public URL in MongoDB.
+    // Cloudinary upload is now the PRIMARY method.
+    let imageUrl = null;
     const cloudinaryConfigured =
       Boolean(process.env.CLOUDINARY_CLOUD_NAME || process.env.CLOUDINARY_NAME) &&
       Boolean(process.env.CLOUDINARY_API_KEY || process.env.CLOUDINARY_KEY) &&
@@ -53,15 +37,30 @@ const analyzeLeaf = async (req, res) => {
         if (uploadResult?.secure_url) {
           imageUrl = uploadResult.secure_url;
           shouldDeleteLocalFile = true;
-        } else {
-          console.warn(
-            "Cloudinary upload succeeded but no secure_url returned. Falling back to local imageUrl."
-          );
+          console.log("Cloudinary upload successful:", imageUrl);
         }
       } catch (uploadError) {
-        console.error("Cloudinary upload failed; falling back to local /uploads:", uploadError);
+        console.error("Cloudinary upload failed:", uploadError.message);
       }
     }
+
+    // Fallback ONLY if Cloudinary failed or is not configured.
+    if (!imageUrl) {
+      imageUrl = `${req.protocol}://${req.get("host")}/uploads/${req.file.filename}`;
+      console.warn("Falling back to local static hosting for image:", imageUrl);
+    }
+
+    // Parse optional location from body
+    const location = req.body.latitude && req.body.longitude
+      ? {
+          latitude: parseFloat(req.body.latitude),
+          longitude: parseFloat(req.body.longitude),
+          address: req.body.address || "",
+        }
+      : undefined;
+
+    // Run the analysis engine
+    const diagnosis = await analyzeImage(localFilePath);
 
     // Persist the result to MongoDB
     const record = await Record.create({

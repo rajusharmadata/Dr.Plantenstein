@@ -1,14 +1,64 @@
 const axios = require("axios");
 const FormData = require("form-data");
 const fs = require("fs");
-const { GoogleGenerativeAI } = require("@google/generative-ai");
+const { GoogleGenAI } = require("@google/genai");
+
+/**
+ * Uses Gemini AI to provide a structured explanation and remedies for a detected disease.
+ */
+const getExpertAnalysis = async (prediction) => {
+  try {
+    const geminiApiKey = process.env.GEMINI_API_KEY;
+    if (!geminiApiKey) {
+      console.warn("GEMINI_API_KEY not found in .env. Skipping AI analysis.");
+      return null;
+    }
+
+    const ai = new GoogleGenAI({ apiKey: geminiApiKey });
+
+    const prompt = `
+        You are "Dr. Planteinstein", a world-class plant pathologist. 
+        You just received a diagnosis from a specialized ML model: "${prediction}".
+        
+        GOAL:
+        1. Explain this diagnosis professionally yet friendly.
+        2. Provide expert agricultural advice.
+        3. LANGUAGE RULE: If this is an Indian crop or if requested, provide the response in a way that respects Hindi/English bilingual needs (Hinglish/Hindi/English).
+        
+        STRICT JSON FORMAT:
+        {
+          "title": "Clear Name of the Disease (in English & Hindi)",
+          "cropName": "Common Name",
+          "cropScientific": "Scientific Name",
+          "status": "healthy/warning/severe/critical",
+          "analysis": {
+            "description": "Conversational explanation (1-2 sentences).",
+            "remedies": "Expert organic & chemical treatments.",
+            "prevention": ["Step 1", "Step 2", "Step 3"],
+            "soilHealth": "Soil & nutrient management advice."
+          }
+        }
+      `;
+
+    const response = await ai.models.generateContent({
+      model: "gemini-3-flash-preview",
+      contents: prompt,
+    });
+
+    const text = response.text;
+    const cleanJson = text.replace(/```json|```/g, "").trim();
+    return JSON.parse(cleanJson);
+  } catch (error) {
+    console.error("Gemini AI Error:", error);
+    return null;
+  }
+};
 
 /**
  * Plant Disease Analysis Engine
  * 1. Sends image to local Flask model (port 5000/predict).
  * 2. Uses the predicted category to query Gemini for expert solutions.
  */
-
 const analyzeImage = async (imagePath) => {
   const modelUrl = process.env.MODEL_URL || "http://localhost:5000/predict";
   const geminiApiKey = process.env.GEMINI_API_KEY;
@@ -33,30 +83,7 @@ const analyzeImage = async (imagePath) => {
     }
 
     try {
-      const genAI = new GoogleGenerativeAI(geminiApiKey);
-      const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
-
-      const prompt = `
-        As a world-class plant pathologist and friendly expert named "Dr. Planteinstein", analyze this detected plant disease: "${prediction}".
-        Respond as if you are talking to a farmer who just showed you a photo of their crops.
-        Provide a structured JSON response (strictly JSON, no extra text) with:
-        - title: A user-friendly name for the disease.
-        - cropName: The common name of the plant.
-        - cropScientific: Scientific name of the plant.
-        - status: One of ["healthy", "warning", "severe", "critical"] based on severity.
-        - analysis: {
-            description: A conversational, expert explanation of what is happening (1-2 sentences).
-            remedies: Specific immediate actions/treatments with an organic focus, written as advice.
-            prevention: An array of 3-4 preventive steps for the future.
-            soilHealth: Advice on soil management to avoid recurrence.
-          }
-      `;
-
-      const result = await model.generateContent(prompt);
-      const text = result.response.text();
-
-      const jsonMatch = text.match(/\{[\s\S]*\}/);
-      const aiSolutions = jsonMatch ? JSON.parse(jsonMatch[0]) : null;
+      const aiSolutions = await getExpertAnalysis(prediction);
 
       if (!aiSolutions) throw new Error("Invalid AI response");
 
@@ -85,7 +112,7 @@ const getFallbackDiagnosis = (prediction, confidence) => {
     confidence: Math.round(confidence * 100) || 0,
     predictionRaw: prediction,
     analysis: {
-      description: "",
+      description: "Dr. Planteinstein is temporarily offline. Please try again later.",
       remedies: "Please consult a local agricultural expert.",
       prevention: ["Maintain regular watering", "Ensure good sunlight"],
       soilHealth: "Test soil pH and nutrients.",

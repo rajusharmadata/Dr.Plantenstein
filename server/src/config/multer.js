@@ -13,11 +13,14 @@ const storage = multer.diskStorage({
 });
 
 const fileFilter = (req, file, cb) => {
-  const allowed = ["image/jpeg", "image/png", "image/webp", "image/jpg"];
+  const allowed = [
+    "image/jpeg", "image/png", "image/webp", "image/jpg",
+    "audio/mpeg", "audio/mp4", "audio/wav", "audio/x-m4a", "audio/m4a"
+  ];
   if (allowed.includes(file.mimetype)) {
     cb(null, true);
   } else {
-    cb(new Error("Only JPEG, PNG, and WEBP images are allowed."), false);
+    cb(new Error("Only JPEG, PNG images and MP3, M4A, WAV audio are allowed."), false);
   }
 };
 

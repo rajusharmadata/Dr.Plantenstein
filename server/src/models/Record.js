@@ -52,6 +52,13 @@ const recordSchema = new mongoose.Schema(
       type: Date,
       default: Date.now,
     },
+    chatMessages: [
+      {
+        role: { type: String, enum: ["user", "model"], required: true },
+        content: { type: String, required: true },
+        timestamp: { type: Date, default: Date.now },
+      },
+    ],
   },
   { timestamps: true }
 );

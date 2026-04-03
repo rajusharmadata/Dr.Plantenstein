@@ -6,7 +6,7 @@ const emailOtpSchema = new mongoose.Schema(
     email: { type: String, required: true, index: true, lowercase: true, trim: true },
     otpHash: { type: String, required: true },
     usedAt: { type: Date, default: null },
-    expiresAt: { type: Date, required: true, index: true },
+    expiresAt: { type: Date, required: true },
   },
   { timestamps: true }
 );
