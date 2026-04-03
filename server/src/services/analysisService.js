@@ -1,125 +1,96 @@
+const axios = require("axios");
+const FormData = require("form-data");
+const fs = require("fs");
+const { GoogleGenerativeAI } = require("@google/generative-ai");
+
 /**
- * Mock AI Disease Analysis Engine
- * In production, replace this with a real ML model API call (e.g. Vertex AI, PlantNet, etc.)
+ * Plant Disease Analysis Engine
+ * 1. Sends image to local Flask model (port 5000/predict).
+ * 2. Uses the predicted category to query Gemini for expert solutions.
  */
 
-const DISEASE_DATABASE = [
-  {
-    title: "Early Blight",
-    cropName: "Tomato",
-    cropScientific: "Solanum lycopersicum",
-    status: "severe",
-    confidence: 92,
-    analysis: {
-      description:
-        "A common fungal infection (Alternaria solani) that primarily affects tomatoes and potatoes, starting on older leaves near the ground.",
-      remedies:
-        "Remove and destroy all infected plant parts immediately. Apply a copper-based fungicide or a mixture of baking soda and water to prevent further spore spread.",
-      prevention: [
-        "Rotate crops annually",
-        "Water at the base, not leaves",
-        "Space plants for airflow",
-      ],
-      soilHealth:
-        "Spores can live in soil for years. Consider using a mulch barrier to prevent soil splashing onto leaves during rain.",
-    },
-  },
-  {
-    title: "Northern Leaf Blight",
-    cropName: "Maize",
-    cropScientific: "Zea mays",
-    status: "warning",
-    confidence: 87,
-    analysis: {
-      description:
-        "A fungal disease (Exserohilum turcicum) that causes elongated tan lesions on maize leaves significantly reducing yield.",
-      remedies:
-        "Apply foliar fungicides such as azoxystrobin or propiconazole. Remove and destroy infected leaves promptly.",
-      prevention: [
-        "Plant resistant hybrid varieties",
-        "Rotate with non-host crops",
-        "Ensure narrow row spacing for airflow",
-      ],
-      soilHealth:
-        "Infected crop debris should be incorporated into the soil or removed to reduce inoculum load next season.",
-    },
-  },
-  {
-    title: "Stem Rust (Puccinia)",
-    cropName: "Wheat",
-    cropScientific: "Triticum aestivum",
-    status: "critical",
-    confidence: 95,
-    analysis: {
-      description:
-        "One of the most devastating wheat diseases caused by Puccinia graminis, forming brick-red uredia on stems and leaves.",
-      remedies:
-        "Apply triazole fungicides (e.g. tebuconazole) immediately at first sign. Avoid dense planting.",
-      prevention: [
-        "Use certified rust-resistant wheat varieties",
-        "Monitor fields weekly during humid seasons",
-        "Eliminate barberry plants nearby (alternate host)",
-      ],
-      soilHealth:
-        "Puccinia spores spread via wind, not soil. Focus on sanitation of infected stubble after harvest.",
-    },
-  },
-  {
-    title: "No Issues Detected",
-    cropName: "Soybean",
-    cropScientific: "Glycine max",
-    status: "healthy",
-    confidence: 98,
-    analysis: {
-      description:
-        "Your crop appears to be in excellent health. No signs of disease, pests, or nutritional deficiency were detected.",
-      remedies: "No remedies needed. Continue your current crop management practices.",
-      prevention: [
-        "Maintain current watering schedule",
-        "Continue crop rotation plan",
-        "Monitor bi-weekly for early detection",
-      ],
-      soilHealth:
-        "Soil conditions appear suitable. Consider a soil nutrient test every 3 months for optimal yield.",
-    },
-  },
-  {
-    title: "Low Moisture Index",
-    cropName: "General Crop",
+const analyzeImage = async (imagePath) => {
+  const modelUrl = process.env.MODEL_URL || "http://localhost:5000/predict";
+  const geminiApiKey = process.env.GEMINI_API_KEY;
+  let prediction = "Unknown Issue";
+  let confidence = 0;
+
+  try {
+    // 1. Call your trained ML Model (DETECT)
+    const form = new FormData();
+    form.append("file", fs.createReadStream(imagePath));
+
+    const modelResponse = await axios.post(modelUrl, form, {
+      headers: { ...form.getHeaders() },
+    });
+
+    prediction = modelResponse.data.prediction;
+    confidence = modelResponse.data.confidence;
+
+    // 2. Query Gemini for solutions (SOLVE)
+    if (!geminiApiKey) {
+      return getFallbackDiagnosis(prediction, confidence);
+    }
+
+    try {
+      const genAI = new GoogleGenerativeAI(geminiApiKey);
+      const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+
+      const prompt = `
+        As a world-class plant pathologist and friendly expert named "Dr. Planteinstein", analyze this detected plant disease: "${prediction}".
+        Respond as if you are talking to a farmer who just showed you a photo of their crops.
+        Provide a structured JSON response (strictly JSON, no extra text) with:
+        - title: A user-friendly name for the disease.
+        - cropName: The common name of the plant.
+        - cropScientific: Scientific name of the plant.
+        - status: One of ["healthy", "warning", "severe", "critical"] based on severity.
+        - analysis: {
+            description: A conversational, expert explanation of what is happening (1-2 sentences).
+            remedies: Specific immediate actions/treatments with an organic focus, written as advice.
+            prevention: An array of 3-4 preventive steps for the future.
+            soilHealth: Advice on soil management to avoid recurrence.
+          }
+      `;
+
+      const result = await model.generateContent(prompt);
+      const text = result.response.text();
+
+      const jsonMatch = text.match(/\{[\s\S]*\}/);
+      const aiSolutions = jsonMatch ? JSON.parse(jsonMatch[0]) : null;
+
+      if (!aiSolutions) throw new Error("Invalid AI response");
+
+      return {
+        ...aiSolutions,
+        confidence: Math.round(confidence * 100),
+        predictionRaw: prediction,
+      };
+    } catch (aiError) {
+      console.error("Gemini AI Error:", aiError.message);
+      return getFallbackDiagnosis(prediction, confidence);
+    }
+
+  } catch (modelError) {
+    console.error("Your Model Error:", modelError.message);
+    return getFallbackDiagnosis("Error in Model Connection", 0);
+  }
+};
+
+const getFallbackDiagnosis = (prediction, confidence) => {
+  return {
+    title: prediction || "Unknown Issue",
+    cropName: "General Plant",
     cropScientific: "N/A",
-    status: "soil",
-    confidence: 78,
+    status: "warning",
+    confidence: Math.round(confidence * 100) || 0,
+    predictionRaw: prediction,
     analysis: {
-      description:
-        "The scan indicates low moisture levels in the soil around your crop, which may stress the plant if left unaddressed.",
-      remedies:
-        "Initiate drip irrigation immediately. Apply organic mulch (straw or wood chips) to retain moisture.",
-      prevention: [
-        "Install soil moisture sensors",
-        "Schedule irrigation based on evapotranspiration data",
-        "Use drought-resistant crop varieties long-term",
-      ],
-      soilHealth:
-        "Low moisture can reduce nutrient uptake. Consider a compost amendment to improve water-holding capacity.",
+      description: "",
+      remedies: "Please consult a local agricultural expert.",
+      prevention: ["Maintain regular watering", "Ensure good sunlight"],
+      soilHealth: "Test soil pH and nutrients.",
     },
-  },
-];
-
-/**
- * Picks one of the mock diseases at random to simulate AI variability.
- * In a real implementation, you'd call:
- *   - Google Vertex AI Vision API
- *   - Plant.id API
- *   - A custom trained TFLite/ONNX model
- */
-const analyzeImage = (imagePath) => {
-  return new Promise((resolve) => {
-    // Simulate a 2-second AI processing delay
-    setTimeout(() => {
-      const randomIndex = Math.floor(Math.random() * DISEASE_DATABASE.length);
-      resolve(DISEASE_DATABASE[randomIndex]);
-    }, 2000);
-  });
+  };
 };
 
 module.exports = { analyzeImage };

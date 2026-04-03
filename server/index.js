@@ -18,11 +18,13 @@ const PORT = process.env.PORT || 3000;
 const start = async () => {
   await connectDB();
 
-  app.listen(PORT, () => {
+  const HOST = "0.0.0.0";
+  app.listen(PORT, HOST, () => {
     console.log(`
 🌿 ─────────────────────────────────────────────────────────
    Dr. Planteinstein API Server
-   Running at: http://localhost:${PORT}
+   Local Network: http://192.168.17.17:${PORT}/api
+   Localhost: http://localhost:${PORT}
    Environment: ${process.env.NODE_ENV || "development"}
 🌿 ─────────────────────────────────────────────────────────
     `);
