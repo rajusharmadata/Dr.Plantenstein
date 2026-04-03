@@ -3,9 +3,24 @@
  * Central file for all communication with the backend server.
  */
 
+import Constants from "expo-constants";
+import { getAuthToken } from "./authStorage";
+
 // ─── Change this to your machine's local IP when testing on a physical device ──
 // e.g. "http://192.168.1.10:3000" — NOT localhost (device can't reach your PC)
-const BASE_URL = "http://localhost:3000/api";
+const { API_BASE_URL } = (Constants.expoConfig?.extra ?? {}) as {
+  API_BASE_URL?: string;
+};
+
+// `API_BASE_URL` is configurable in `app.json` (Expo "extra" field).
+// This avoids hardcoding `localhost`, which does not work on physical devices.
+const BASE_URL = API_BASE_URL ?? "http://192.168.27.193:3000/api";
+
+const buildAuthHeaders = async () => {
+  const token = await getAuthToken();
+  if (!token) return {};
+  return { Authorization: `Bearer ${token}` };
+};
 
 export type AnalysisResult = {
   _id: string;
@@ -69,7 +84,7 @@ export const analyzeLeaf = async (
     body: formData,
     headers: {
       Accept: "application/json",
-      "Content-Type": "multipart/form-data",
+      ...(await buildAuthHeaders()),
     },
   });
 
@@ -92,7 +107,12 @@ export const getRecords = async (
   const params = new URLSearchParams({ page: String(page) });
   if (status) params.append("status", status);
 
-  const response = await fetch(`${BASE_URL}/records?${params.toString()}`);
+  const response = await fetch(`${BASE_URL}/records?${params.toString()}`, {
+    headers: {
+      Accept: "application/json",
+      ...(await buildAuthHeaders()),
+    },
+  });
   const json = await response.json();
 
   if (!json.success) {
@@ -106,7 +126,12 @@ export const getRecords = async (
  * Fetch a single record by its ID.
  */
 export const getRecordById = async (id: string): Promise<AnalysisResult> => {
-  const response = await fetch(`${BASE_URL}/records/${id}`);
+  const response = await fetch(`${BASE_URL}/records/${id}`, {
+    headers: {
+      Accept: "application/json",
+      ...(await buildAuthHeaders()),
+    },
+  });
   const json = await response.json();
 
   if (!json.success) {
@@ -122,6 +147,10 @@ export const getRecordById = async (id: string): Promise<AnalysisResult> => {
 export const deleteRecord = async (id: string): Promise<void> => {
   const response = await fetch(`${BASE_URL}/records/${id}`, {
     method: "DELETE",
+    headers: {
+      Accept: "application/json",
+      ...(await buildAuthHeaders()),
+    },
   });
   const json = await response.json();
 
