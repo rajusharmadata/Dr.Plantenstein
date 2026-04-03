@@ -1,10 +1,26 @@
-import { Tabs } from "expo-router";
+import { Redirect, Tabs } from "expo-router";
 import { FontAwesome5 } from "@expo/vector-icons";
 import { COLORS, SPACING, RADIUS } from "../../src/constants/theme";
 import { View, StyleSheet } from "react-native";
 import { Header } from "../../src/components/Header";
+import { useEffect, useState } from "react";
+import { getAuthToken } from "../../src/services/authStorage";
 
 export default function TabLayout() {
+  const [ready, setReady] = useState(false);
+  const [hasAuth, setHasAuth] = useState(false);
+
+  useEffect(() => {
+    (async () => {
+      const token = await getAuthToken();
+      setHasAuth(Boolean(token));
+      setReady(true);
+    })();
+  }, []);
+
+  if (!ready) return null;
+  if (!hasAuth) return <Redirect href="/auth/email" />;
+
   return (
     <Tabs
       screenOptions={{
