@@ -1,6 +1,6 @@
 const express = require("express");
 const router = express.Router();
-const { createPost, getPosts } = require("../controllers/communityController");
+const { createPost, getPosts, toggleLike } = require("../controllers/communityController");
 const upload = require("../config/multer");
 const { requireAuth } = require("../middleware/requireAuth");
 
@@ -20,5 +20,11 @@ router.post(
  * Fetch the social feed.
  */
 router.get("/posts", requireAuth, getPosts);
+
+/**
+ * Route: POST /api/community/posts/:id/toggle-like
+ * Toggle like for a post.
+ */
+router.post("/posts/:id/toggle-like", requireAuth, toggleLike);
 
 module.exports = router;

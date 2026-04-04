@@ -28,6 +28,7 @@ const analyzeLeaf = async (req, res) => {
 
     if (cloudinaryConfigured) {
       const folder = process.env.CLOUDINARY_FOLDER || "plantenstein";
+      console.log(`[Cloudinary] Attempting upload to folder: ${folder}...`);
       try {
         const uploadResult = await cloudinary.uploader.upload(localFilePath, {
           folder,
@@ -37,17 +38,20 @@ const analyzeLeaf = async (req, res) => {
         if (uploadResult?.secure_url) {
           imageUrl = uploadResult.secure_url;
           shouldDeleteLocalFile = true;
-          console.log("Cloudinary upload successful:", imageUrl);
+          console.log("[Cloudinary] Upload SUCCESS:", imageUrl);
+        } else {
+          console.error("[Cloudinary] Upload failed: No secure_url returned", uploadResult);
         }
       } catch (uploadError) {
-        console.error("Cloudinary upload failed:", uploadError.message);
+        console.error("[Cloudinary] Upload catch error:", uploadError.message);
+        if (uploadError.http_code) console.error("[Cloudinary] HTTP Code:", uploadError.http_code);
       }
     }
 
     // Fallback ONLY if Cloudinary failed or is not configured.
     if (!imageUrl) {
       imageUrl = `${req.protocol}://${req.get("host")}/uploads/${req.file.filename}`;
-      console.warn("Falling back to local static hosting for image:", imageUrl);
+      console.warn("[Cloudinary] Falling back to local static hosting:", imageUrl);
     }
 
     // Parse optional location from body
@@ -61,14 +65,22 @@ const analyzeLeaf = async (req, res) => {
 
     // Run the analysis engine
     const diagnosis = await analyzeImage(localFilePath);
+    if (!diagnosis) throw new Error("Analysis failed: No diagnosis returned");
 
     // Persist the result to MongoDB
-    const record = await Record.create({
-      ...diagnosis,
-      imageUrl,
-      location,
-      userId: req.user?.userId,
-    });
+    let record;
+    try {
+      record = await Record.create({
+        ...diagnosis,
+        imageUrl,
+        location,
+        userId: req.user?.userId,
+      });
+    } catch (saveError) {
+      console.error("DB Save Error (Record.create):", saveError.message);
+      if (saveError.errors) console.error("Validation Errors:", JSON.stringify(saveError.errors, null, 2));
+      throw saveError; // Re-throw to be caught by the outer catch
+    }
 
     res.status(201).json({
       success: true,

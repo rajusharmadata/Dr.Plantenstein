@@ -47,6 +47,21 @@ const postSchema = new mongoose.Schema(
         createdAt: { type: Date, default: Date.now },
       },
     ],
+    // Optional diagnosis info from the AI
+    diagnosis: {
+      title: String,
+      status: String,
+      confidence: Number,
+    },
+    // New fields for Farmer's Guild UI
+    type: {
+      type: String,
+      enum: ["post", "scan_analysis", "question"],
+      default: "post",
+    },
+    remedy: String,
+    precaution: String,
+    authorRole: String, // e.g. "FARMERS GROUP"
   },
   { timestamps: true }
 );

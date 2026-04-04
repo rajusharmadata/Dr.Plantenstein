@@ -9,7 +9,6 @@ import {
   Switch,
   ActivityIndicator,
   Alert,
-  Image as RNImage,
 } from "react-native";
 import { useRouter, Stack } from "expo-router";
 import { FontAwesome5, Ionicons } from "@expo/vector-icons";
@@ -18,7 +17,7 @@ import * as Location from "expo-location";
 import { Image } from "expo-image";
 import { COLORS, SPACING, RADIUS, SHADOWS } from "../../src/constants/theme";
 import { TYPOGRAPHY } from "../../src/constants/typography";
-import { createCommunityPost, getUserProfile, UserProfile } from "../../src/services/api";
+import { createCommunityPost, getUserProfile, UserProfile, analyzeLeaf, AnalysisResult } from "../../src/services/api";
 
 type Category = "Cereals" | "Vegetables" | "Fruits" | "Other";
 
@@ -31,6 +30,10 @@ export default function NewPostScreen() {
   const [user, setUser] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(false);
   const [fetchingUser, setFetchingUser] = useState(true);
+  
+  // AI Diagnosis State
+  const [diagnosis, setDiagnosis] = useState<AnalysisResult | null>(null);
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -60,7 +63,29 @@ export default function NewPostScreen() {
 
     if (!result.canceled) {
       const newUris = result.assets.map((a) => a.uri);
-      setImages([...images, ...newUris]);
+      const updatedImages = [...images, ...newUris];
+      setImages(updatedImages);
+
+      // Trigger AI Analysis automatically on first image if not already diagnosed
+      if (!diagnosis && updatedImages.length > 0) {
+        handleAnalysis(updatedImages[0]);
+      }
+    }
+  };
+
+  const handleAnalysis = async (uri: string) => {
+    setIsAnalyzing(true);
+    try {
+      const result = await analyzeLeaf(uri);
+      setDiagnosis(result);
+      // Auto-set category based on diagnosis if possible
+      if (result.cropName.toLowerCase().includes("cereal") || result.cropName.toLowerCase().includes("wheat") || result.cropName.toLowerCase().includes("rice")) {
+        setCategory("Cereals");
+      }
+    } catch (error) {
+      console.warn("Auto-analysis failed:", error);
+    } finally {
+      setIsAnalyzing(false);
     }
   };
 
@@ -68,6 +93,7 @@ export default function NewPostScreen() {
     const updated = [...images];
     updated.splice(index, 1);
     setImages(updated);
+    if (updated.length === 0) setDiagnosis(null);
   };
 
   const handlePost = async () => {
@@ -90,7 +116,13 @@ export default function NewPostScreen() {
         }
       }
 
-      await createCommunityPost(content, category, images, locationData);
+      const diagData = diagnosis ? { 
+        title: diagnosis.title, 
+        status: diagnosis.status, 
+        confidence: diagnosis.confidence 
+      } : undefined;
+
+      await createCommunityPost(content, category, images, locationData, diagData);
       Alert.alert("Success", "Post shared with the community!", [
         { text: "OK", onPress: () => router.back() },
       ]);
@@ -112,17 +144,16 @@ export default function NewPostScreen() {
     <View style={styles.container}>
       <Stack.Screen
         options={{
+          headerShown: true, // IMPORTANT: Fix for missing header buttons
           headerTitle: "New Post",
           headerTitleStyle: { ...TYPOGRAPHY.h3, color: COLORS.primary },
           headerRight: () => (
-            <TouchableOpacity onPress={handlePost} disabled={loading}>
-              <View style={styles.postButtonHeader}>
-                {loading ? <ActivityIndicator size="small" color={COLORS.white} /> : <Text style={styles.postButtonText}>Post</Text>}
-              </View>
+            <TouchableOpacity onPress={handlePost} disabled={loading} style={styles.postButtonHeader}>
+              {loading ? <ActivityIndicator size="small" color={COLORS.white} /> : <Text style={styles.postButtonText}>Post</Text>}
             </TouchableOpacity>
           ),
           headerLeft: () => (
-            <TouchableOpacity onPress={() => router.back()}>
+            <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
               <Ionicons name="arrow-back" size={24} color={COLORS.primary} />
             </TouchableOpacity>
           ),
@@ -136,15 +167,15 @@ export default function NewPostScreen() {
         <View style={styles.userCard}>
           <View style={styles.avatarWrapper}>
             <View style={styles.avatarPlaceholder}>
-              <FontAwesome5 name="user" size={20} color={COLORS.primary} />
+              <FontAwesome5 name="user-alt" size={24} color={COLORS.primary} />
             </View>
             <View style={styles.badge}>
               <Ionicons name="checkmark-circle" size={14} color={COLORS.white} />
             </View>
           </View>
           <View style={styles.userInfo}>
-            <Text style={styles.userName}>{user?.displayName || "Guest User"}</Text>
-            <Text style={styles.userSubtitle}>Farmer • Worldwide</Text>
+            <Text style={styles.userName}>{user?.displayName || "Samuel Okoro"}</Text>
+            <Text style={styles.userSubtitle}>Cereal Farmer • Nigeria</Text>
           </View>
         </View>
 
@@ -161,9 +192,32 @@ export default function NewPostScreen() {
           />
         </View>
 
+        {/* AI Diagnosis Card (Integrated Model) */}
+        {(isAnalyzing || diagnosis) && (
+          <View style={[styles.diagnosisCard, diagnosis?.status === 'healthy' ? styles.diagSuccess : styles.diagWarning]}>
+            <View style={styles.diagHeader}>
+              <FontAwesome5 
+                name={isAnalyzing ? "sync" : "robot"} 
+                size={16} 
+                color={diagnosis?.status === 'healthy' ? COLORS.healthyText : COLORS.warningText} 
+              />
+              <Text style={[styles.diagTitle, { color: diagnosis?.status === 'healthy' ? COLORS.healthyText : COLORS.warningText }]}>
+                {isAnalyzing ? "Analyzing Symptoms..." : "AI Diagnosis Result"}
+              </Text>
+            </View>
+            {isAnalyzing ? (
+              <ActivityIndicator size="small" color={COLORS.primary} />
+            ) : (
+              <View>
+                <Text style={styles.diagResult}>{diagnosis?.title}</Text>
+              </View>
+            )}
+          </View>
+        )}
+
         {/* Evidence Section */}
         <Text style={styles.sectionTitle}>EVIDENCE & PHOTOS</Text>
-        <View style={styles.photoContainer}>
+        <View style={styles.photoSection}>
           <TouchableOpacity style={styles.addPhotoButton} onPress={pickImage}>
             <Ionicons name="camera-outline" size={32} color={COLORS.primary} />
             <Text style={styles.addPhotoText}>Add Photos</Text>
@@ -213,7 +267,7 @@ export default function NewPostScreen() {
         {/* Location Toggle */}
         <View style={styles.locationCard}>
           <View style={styles.locationIconWrapper}>
-            <Ionicons name="location-outline" size={24} color={COLORS.primary} />
+            <Ionicons name="location-sharp" size={20} color={COLORS.primary} />
           </View>
           <View style={styles.locationTextWrapper}>
             <Text style={styles.locationTitle}>Add your location</Text>
@@ -222,7 +276,7 @@ export default function NewPostScreen() {
           <Switch
             value={useLocation}
             onValueChange={setUseLocation}
-            trackColor={{ false: COLORS.background, true: COLORS.primary }}
+            trackColor={{ false: COLORS.border, true: COLORS.primary }}
             thumbColor={COLORS.white}
           />
         </View>
@@ -234,17 +288,20 @@ export default function NewPostScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: COLORS.white,
+    backgroundColor: COLORS.background, // Cream background from screenshot
   },
   scrollContent: {
     padding: SPACING.lg,
   },
+  backButton: {
+    paddingRight: SPACING.md,
+  },
   postButtonHeader: {
     backgroundColor: COLORS.primary,
-    paddingHorizontal: SPACING.md,
+    paddingHorizontal: SPACING.lg,
     paddingVertical: SPACING.xs,
-    borderRadius: RADIUS.full,
-    minWidth: 70,
+    borderRadius: RADIUS.pill,
+    minWidth: 80,
     alignItems: "center",
   },
   postButtonText: {
@@ -258,69 +315,104 @@ const styles = StyleSheet.create({
     marginBottom: SPACING.xl,
   },
   avatarWrapper: {
-    width: 60,
-    height: 60,
+    width: 64,
+    height: 64,
     position: "relative",
   },
   avatarPlaceholder: {
-    width: 60,
-    height: 60,
-    borderRadius: 30,
-    backgroundColor: COLORS.background,
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    backgroundColor: "#E1E8D9",
     justifyContent: "center",
     alignItems: "center",
-    borderWidth: 2,
+    borderWidth: 1,
     borderColor: COLORS.primary,
   },
   badge: {
     position: "absolute",
-    bottom: 0,
-    right: 0,
+    bottom: -2,
+    right: -2,
     backgroundColor: COLORS.primary,
-    borderRadius: 10,
-    width: 20,
-    height: 20,
+    borderRadius: 12,
+    width: 22,
+    height: 22,
     justifyContent: "center",
     alignItems: "center",
     borderWidth: 2,
-    borderColor: COLORS.white,
+    borderColor: COLORS.background,
   },
   userInfo: {
     marginLeft: SPACING.md,
   },
   userName: {
     ...TYPOGRAPHY.h3,
-    fontSize: 18,
-    color: "#333",
+    fontSize: 20,
+    color: COLORS.textPrimary,
   },
   userSubtitle: {
     ...TYPOGRAPHY.caption,
-    color: COLORS.inactive,
+    fontSize: 14,
+    color: COLORS.textSecondary,
   },
   inputCard: {
     backgroundColor: COLORS.white,
     borderRadius: RADIUS.lg,
-    padding: SPACING.md,
-    minHeight: 150,
-    marginBottom: SPACING.xl,
-    borderWidth: 1,
-    borderColor: COLORS.background,
+    padding: SPACING.lg,
+    minHeight: 180,
+    marginBottom: SPACING.lg,
     ...SHADOWS.sm,
   },
   textInput: {
     flex: 1,
     ...TYPOGRAPHY.body,
     fontSize: 16,
-    color: "#333",
+    color: COLORS.textPrimary,
+  },
+  diagnosisCard: {
+    padding: SPACING.md,
+    borderRadius: RADIUS.md,
+    marginBottom: SPACING.lg,
+    borderWidth: 1,
+    ...SHADOWS.sm,
+  },
+  diagSuccess: {
+    backgroundColor: COLORS.healthyBg,
+    borderColor: COLORS.success,
+  },
+  diagWarning: {
+    backgroundColor: COLORS.warningBg,
+    borderColor: COLORS.warningText + '40',
+  },
+  diagHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: SPACING.xs,
+  },
+  diagTitle: {
+    marginLeft: SPACING.xs,
+    fontSize: 12,
+    fontWeight: "700",
+    textTransform: "uppercase",
+  },
+  diagResult: {
+    ...TYPOGRAPHY.bodySemibold,
+    fontSize: 16,
+    marginTop: SPACING.xs,
+  },
+  diagConfidence: {
+    ...TYPOGRAPHY.tiny,
+    color: COLORS.textSecondary,
+    marginTop: 2,
   },
   sectionTitle: {
     ...TYPOGRAPHY.caption,
-    fontWeight: "700",
-    letterSpacing: 1,
-    color: COLORS.inactive,
+    fontWeight: "800",
+    letterSpacing: 1.2,
+    color: COLORS.textSecondary,
     marginBottom: SPACING.md,
   },
-  photoContainer: {
+  photoSection: {
     flexDirection: "row",
     marginBottom: SPACING.xl,
   },
@@ -333,24 +425,25 @@ const styles = StyleSheet.create({
     borderColor: COLORS.primary,
     justifyContent: "center",
     alignItems: "center",
-    backgroundColor: COLORS.background + "20",
+    backgroundColor: COLORS.white,
   },
   addPhotoText: {
     marginTop: SPACING.xs,
     color: COLORS.primary,
-    fontWeight: "600",
+    fontWeight: "700",
     fontSize: 14,
   },
   photoScroll: {
-    marginLeft: SPACING.sm,
+    marginLeft: SPACING.md,
   },
   imagePreviewWrapper: {
     width: 140,
     height: 140,
     borderRadius: RADIUS.lg,
-    marginLeft: SPACING.sm,
+    marginRight: SPACING.md,
     overflow: "hidden",
     position: "relative",
+    ...SHADOWS.sm,
   },
   imagePreview: {
     width: 140,
@@ -358,9 +451,9 @@ const styles = StyleSheet.create({
   },
   removeImageBtn: {
     position: "absolute",
-    top: 5,
-    right: 5,
-    backgroundColor: "rgba(0,0,0,0.5)",
+    top: 8,
+    right: 8,
+    backgroundColor: "rgba(0,0,0,0.6)",
     borderRadius: 12,
     width: 24,
     height: 24,
@@ -376,20 +469,17 @@ const styles = StyleSheet.create({
   categoryChip: {
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: COLORS.background,
+    backgroundColor: "#E8EFE8",
     paddingHorizontal: SPACING.lg,
     paddingVertical: SPACING.sm,
     borderRadius: RADIUS.full,
-    borderWidth: 1,
-    borderColor: "transparent",
   },
   categoryChipActive: {
     backgroundColor: COLORS.primary,
-    borderColor: COLORS.primary,
   },
   categoryText: {
     marginLeft: SPACING.xs,
-    fontWeight: "600",
+    fontWeight: "700",
     color: COLORS.primary,
     fontSize: 14,
   },
@@ -399,32 +489,29 @@ const styles = StyleSheet.create({
   locationCard: {
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: COLORS.background + "40",
+    backgroundColor: COLORS.white,
     padding: SPACING.md,
     borderRadius: RADIUS.lg,
-    borderWidth: 1,
-    borderColor: COLORS.background,
+    ...SHADOWS.sm,
   },
   locationIconWrapper: {
     width: 44,
     height: 44,
     borderRadius: RADIUS.md,
-    backgroundColor: COLORS.white,
+    backgroundColor: COLORS.background,
     justifyContent: "center",
     alignItems: "center",
-    ...SHADOWS.sm,
   },
   locationTextWrapper: {
     flex: 1,
     marginLeft: SPACING.md,
   },
   locationTitle: {
-    ...TYPOGRAPHY.body,
-    fontWeight: "700",
-    color: "#333",
+    ...TYPOGRAPHY.bodySemibold,
+    color: COLORS.textPrimary,
   },
   locationSubtitle: {
     ...TYPOGRAPHY.caption,
-    color: COLORS.inactive,
+    color: COLORS.textSecondary,
   },
 });

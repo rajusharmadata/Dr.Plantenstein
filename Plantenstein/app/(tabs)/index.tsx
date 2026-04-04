@@ -7,12 +7,14 @@ import {
   TouchableOpacity,
   Image,
   Dimensions,
+  Alert,
 } from "react-native";
 import { COLORS, SPACING, RADIUS } from "../../src/constants/theme";
 import { TYPOGRAPHY } from "../../src/constants/typography";
 import { FontAwesome5, Ionicons } from "@expo/vector-icons";
 import { useTranslation } from "react-i18next";
 import { useRouter } from "expo-router";
+import * as ImagePicker from "expo-image-picker";
 
 const { width } = Dimensions.get("window");
 
@@ -24,14 +26,10 @@ export default function Home() {
   useEffect(() => {
     const fetchRealWeather = async () => {
       try {
-        // In a real device, we'd use expo-location to get lat/lon
-        // For now, we'll use a default location (e.g., Delhi, India)
         const lat = 28.6139;
         const lon = 77.2090;
-        
-        const response = await fetch(`http://192.168.17.17:3000/api/weather?lat=${lat}&lon=${lon}`);
+        const response = await fetch(`http://192.168.31.68:3000/api/weather?lat=${lat}&lon=${lon}`);
         const result = await response.json();
-        
         if (result.success) {
           setWeather(result.data);
         }
@@ -39,9 +37,37 @@ export default function Home() {
         console.error("Error fetching weather from backend:", error);
       }
     };
-
     fetchRealWeather();
   }, []);
+
+  const handleGalleryUpload = async () => {
+    try {
+      // Request media library permission if not already granted
+      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (status !== "granted") {
+        Alert.alert(
+          "Permission Required",
+          "Please allow access to your photo library to upload images.",
+          [{ text: "OK" }]
+        );
+        return;
+      }
+
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ["images"],
+        allowsEditing: true,
+        quality: 1,
+      });
+
+      if (!result.canceled && result.assets && result.assets.length > 0) {
+        const imageUri = result.assets[0].uri;
+        // Navigate to the scan tab with the selected image URI
+        router.push({ pathname: "/(tabs)/scan", params: { preselectedUri: imageUri } });
+      }
+    } catch (err: any) {
+      Alert.alert("Error", "Could not open photo library. Please try again.");
+    }
+  };
 
   return (
     <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
@@ -81,7 +107,7 @@ export default function Home() {
 
       {/* Quick Actions Row */}
       <View style={styles.actionRow}>
-        <TouchableOpacity style={styles.actionCard} activeOpacity={0.8}>
+        <TouchableOpacity style={styles.actionCard} activeOpacity={0.8} onPress={handleGalleryUpload}>
           <View style={styles.actionIconContainer}>
             <Ionicons name="image-outline" size={24} color={COLORS.primary} />
           </View>

@@ -1,6 +1,21 @@
 const Record = require("../models/Record");
-const { GoogleGenerativeAI } = require("@google/generative-ai");
 const fs = require("fs");
+const path = require("path");
+
+// ─── Gemini AI Setup (using correct @google/genai v1.x API) ─────────────────
+// The correct class is GoogleGenAI, and response.text is a property, NOT a function.
+const { GoogleGenAI } = require("@google/genai");
+
+const logError = (context, error) => {
+  const logPath = path.join(__dirname, "../../server_error.log");
+  const timestamp = new Date().toISOString();
+  const logMessage = `[${timestamp}] ${context}: ${error.message}\n${error.stack}\n\n`;
+  try { fs.appendFileSync(logPath, logMessage); } catch (e) { /* ignore */ }
+};
+
+// Initialise the AI client once (not on every request)
+const geminiApiKey = () => process.env.GEMINI_API_KEY;
+const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-2.0-flash-lite";
 
 /**
  * GET /api/records
@@ -51,120 +66,193 @@ const deleteRecord = async (req, res) => {
 
 /**
  * POST /api/records/:id/chat
- * Standard non-streaming response with Hindi & History support.
+ * Uses GoogleGenAI with the correct API: ai.models.generateContent() & response.text (property)
  */
 const addChatMessage = async (req, res) => {
   try {
     const { message } = req.body;
-    if (!message) return res.status(400).json({ success: false, message: "No message provided." });
+    if (!message || message.trim() === "") {
+      return res.status(400).json({ success: false, message: "No message provided." });
+    }
 
     const record = await Record.findOne({ _id: req.params.id, userId: req.user?.userId });
     if (!record) return res.status(404).json({ success: false, message: "Record not found." });
 
-    const geminiApiKey = process.env.GEMINI_API_KEY;
-    const ai = new GoogleGenerativeAI(geminiApiKey);
+    const apiKey = geminiApiKey();
+    if (!apiKey) {
+      return res.status(500).json({ success: false, message: "AI service not configured." });
+    }
 
-    const historyText = record.chatMessages.map(m => `${m.role === 'user' ? 'User' : 'Dr. Planteinstein'}: ${m.content}`).join('\n');
-    
-    // Hindi + Context Prompt - Sharpened for better "Memory"
+    // Build conversation history for context
+    const historyText = record.chatMessages
+      .slice(-10) // Last 10 messages to keep context manageable
+      .map(m => `${m.role === "user" ? "Kisan (Farmer)" : "Dr. Planteinstein"}: ${m.content}`)
+      .join("\n");
+
     const contextPrompt = `
-      You are "Dr. Planteinstein", a highly intelligent and empathetic professional plant pathologist.
-      
-      CORE KNOWLEDGE:
-      - CROP: ${record.cropName}
-      - INITIAL DIAGNOSIS: "${record.title}"
-      
-      YOUR MEMORY (PREVIOUS CONVERSATION):
-      ${historyText || "No previous history. This is the start of the consultation."}
-      
-      INSTRUCTIONS:
-      1. Use the "PREVIOUS CONVERSATION" logic above to maintain continuity. If the user refers to something said earlier, you MUST know what they are talking about.
-      2. If the user asks in Hindi or Hinglish, respond in fluent Hindi or Hinglish.
-      3. Be concise but expert.
-      
-      USER'S NEW MESSAGE: "${message}"
-      
-      RESPONSE LOGIC: Acknowledge previous context if relevant. Give expert advice.
-    `;
+You are "Dr. Planteinstein", a friendly and expert plant pathologist and agricultural advisor.
+You help farmers diagnose and treat crop diseases with practical, actionable advice.
 
-    const model = ai.getGenerativeModel({ model: "gemini-1.5-flash" });
-    const result = await model.generateContent(contextPrompt);
-    const text = result.response.text();
+CROP INFORMATION:
+- Crop Name: ${record.cropName}
+- Scientific Name: ${record.cropScientific || "N/A"}
+- Diagnosis: ${record.title}
+- Severity: ${record.status}
+- Confidence: ${record.confidence}%
 
-    record.chatMessages.push({ role: "user", content: message });
-    record.chatMessages.push({ role: "model", content: text });
+CONVERSATION HISTORY (last 10 messages):
+${historyText || "This is the beginning of the conversation."}
+
+FARMER'S QUESTION: "${message.trim()}"
+
+INSTRUCTIONS:
+- Respond in a warm, friendly, expert manner
+- If the farmer writes in Hindi, respond in Hindi. If in English, respond in English.
+- Keep response concise (2-4 paragraphs max)
+- Be practical and give actionable advice
+- Always sign responses as "Dr. Planteinstein 🌿"
+    `.trim();
+
+    console.log("[AI Chat] Processing request for record:", req.params.id);
+
+    const ai = new GoogleGenAI({ apiKey });
+    const response = await ai.models.generateContent({
+      model: GEMINI_MODEL,
+      contents: contextPrompt,
+    });
+
+    // response.text is a PROPERTY, not a method (per @google/genai v1.x SDK)
+    const text = response.text;
+
+    if (!text || text.trim() === "") {
+      console.error("[AI Chat] Empty AI response for record:", req.params.id);
+      throw new Error("AI returned an empty response.");
+    }
+
+    console.log("[AI Chat] Success, response length:", text.length);
+
+    record.chatMessages.push({ role: "user", content: message.trim() });
+    record.chatMessages.push({ role: "model", content: text.trim() });
     await record.save();
 
-    res.status(200).json({ 
-      success: true, 
+    res.status(200).json({
+      success: true,
       userMessage: record.chatMessages[record.chatMessages.length - 2],
-      aiResponse: record.chatMessages[record.chatMessages.length - 1] 
+      aiResponse: record.chatMessages[record.chatMessages.length - 1],
     });
 
   } catch (error) {
-    console.error("addChatMessage error:", error);
-    res.status(500).json({ success: false, message: "AI response failed." });
+    console.error("[AI Chat] Error:", error.message, "| Status:", error.status || "N/A");
+    logError("addChatMessage", error);
+
+    // ── Graceful fallback: if Gemini is rate-limited or temporarily down, ──────
+    // save the user's message and return a friendly "busy" response so the
+    // chat continues working instead of showing a crash error.
+    const isRateLimited = error.status === 429 || (error.message && error.message.includes("429"));
+    const isUnavailable = error.status === 503 || error.status === 500;
+
+    if (isRateLimited || isUnavailable) {
+      try {
+        const userMsg = req.body.message?.trim() || "";
+        const fallbackText = isRateLimited
+          ? "मैं अभी बहुत व्यस्त हूँ (I'm currently handling many requests). Please try again in a moment — Dr. Planteinstein 🌿"
+          : "I'm temporarily offline. Please try again shortly — Dr. Planteinstein 🌿";
+
+        const record = await Record.findOne({ _id: req.params.id });
+        if (record && userMsg) {
+          record.chatMessages.push({ role: "user", content: userMsg });
+          record.chatMessages.push({ role: "model", content: fallbackText });
+          await record.save();
+          return res.status(200).json({
+            success: true,
+            userMessage: record.chatMessages[record.chatMessages.length - 2],
+            aiResponse: record.chatMessages[record.chatMessages.length - 1],
+          });
+        }
+      } catch (fallbackErr) {
+        console.error("[AI Chat] Fallback also failed:", fallbackErr.message);
+      }
+    }
+
+    res.status(500).json({
+      success: false,
+      message: "AI response failed.",
+      detail: process.env.NODE_ENV !== "production" ? error.message : undefined,
+    });
   }
 };
 
 /**
  * POST /api/records/:id/voice-chat
+ * Multimodal voice processing with Gemini
  */
 const addVoiceChatMessage = async (req, res) => {
   const localFilePath = req.file?.path;
   try {
-    if (!req.file) return res.status(400).json({ success: false, message: "No audio." });
+    if (!req.file) {
+      return res.status(400).json({ success: false, message: "No audio file provided." });
+    }
 
     const record = await Record.findOne({ _id: req.params.id, userId: req.user?.userId });
-    const geminiApiKey = process.env.GEMINI_API_KEY;
-    const ai = new GoogleGenerativeAI(geminiApiKey);
+    if (!record) return res.status(404).json({ success: false, message: "Record not found." });
+
+    const apiKey = geminiApiKey();
+    if (!apiKey) {
+      return res.status(500).json({ success: false, message: "AI service not configured." });
+    }
+
     const audioData = fs.readFileSync(localFilePath).toString("base64");
+    const historyText = record.chatMessages
+      .slice(-6)
+      .map(m => `${m.role === "user" ? "Farmer" : "Dr. Planteinstein"}: ${m.content}`)
+      .join("\n");
 
-    const historyText = record.chatMessages.map(m => `${m.role === 'user' ? 'User' : 'Dr. Planteinstein'}: ${m.content}`).join('\n');
-    
-    // Audio + Context Prompt - Sharpened for better "Memory"
     const prompt = `
-      You are "Dr. Planteinstein", a professional plant pathologist with deep empathy.
-      
-      CORE KNOWLEDGE:
-      - CROP: ${record.cropName}
-      - INITIAL DIAGNOSIS: "${record.title}"
-      
-      YOUR MEMORY (PREVIOUS CONVERSATION):
-      ${historyText || "No previous history. This is the start of the consultation."}
-      
-      INSTRUCTIONS:
-      1. Listen to the user's audio carefully.
-      2. If the user refers to past advice or messages, you MUST identify them from "YOUR MEMORY".
-      3. Match user's language (Hindi or English).
-      
-      GOAL: Provide a JSON with "transcription" (their spoken words) and "response" (your advice).
-    `;
+You are "Dr. Planteinstein", a friendly and expert plant pathologist.
+CROP: ${record.cropName}, DIAGNOSIS: "${record.title}", STATUS: ${record.status}
+RECENT HISTORY: ${historyText || "None."}
 
-    const model = ai.getGenerativeModel({ model: "gemini-1.5-flash" });
-    const result = await model.generateContent([
-      { text: prompt },
-      { inlineData: { data: audioData, mimeType: req.file.mimetype } },
-    ]);
-    const response = result.response;
-    const text = response.text();
+Listen carefully to the audio message from the farmer.
+Respond with a JSON object containing exactly two fields:
+- "transcription": what the farmer said (transcribe the audio accurately)  
+- "response": your expert response in the same language as the farmer spoke
+
+JSON response only, no markdown.
+    `.trim();
+
+    const ai = new GoogleGenAI({ apiKey });
+    const response = await ai.models.generateContent({
+      model: GEMINI_MODEL,
+      contents: [
+        { text: prompt },
+        { inlineData: { data: audioData, mimeType: req.file.mimetype } },
+      ],
+    });
+
+    const text = response.text;
+    if (!text) throw new Error("Empty AI response for voice chat.");
 
     const cleanJson = text.replace(/```json|```/g, "").trim();
     const parsed = JSON.parse(cleanJson);
+
+    if (!parsed.transcription || !parsed.response) {
+      throw new Error("AI response missing required fields: transcription or response.");
+    }
 
     record.chatMessages.push({ role: "user", content: parsed.transcription });
     record.chatMessages.push({ role: "model", content: parsed.response });
     await record.save();
 
-    res.status(200).json({ 
-      success: true, 
+    res.status(200).json({
+      success: true,
       userMessage: record.chatMessages[record.chatMessages.length - 2],
-      aiResponse: record.chatMessages[record.chatMessages.length - 1] 
+      aiResponse: record.chatMessages[record.chatMessages.length - 1],
     });
 
   } catch (error) {
-    console.error("addVoiceChatMessage error:", error);
-    res.status(500).json({ success: false, message: "Voice processing failed." });
+    console.error("addVoiceChatMessage error:", error.message);
+    logError("addVoiceChatMessage", error);
+    res.status(500).json({ success: false, message: "Voice processing failed.", detail: error.message });
   } finally {
     if (localFilePath) fs.unlink(localFilePath, () => {});
   }

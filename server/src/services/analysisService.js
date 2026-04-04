@@ -3,121 +3,135 @@ const FormData = require("form-data");
 const fs = require("fs");
 const { GoogleGenAI } = require("@google/genai");
 
+const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-2.0-flash-lite";
+
 /**
- * Uses Gemini AI to provide a structured explanation and remedies for a detected disease.
+ * Uses Gemini AI to provide structured expert analysis for a detected disease.
+ * Uses the correct @google/genai v1.x API: ai.models.generateContent() & response.text (property)
  */
 const getExpertAnalysis = async (prediction) => {
   try {
-    const geminiApiKey = process.env.GEMINI_API_KEY;
-    if (!geminiApiKey) {
-      console.warn("GEMINI_API_KEY not found in .env. Skipping AI analysis.");
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey) {
+      console.warn("[Analysis] GEMINI_API_KEY not found in .env. Skipping AI analysis.");
       return null;
     }
 
-    const ai = new GoogleGenAI({ apiKey: geminiApiKey });
-
     const prompt = `
-        You are "Dr. Planteinstein", a world-class plant pathologist. 
-        You just received a diagnosis from a specialized ML model: "${prediction}".
-        
-        GOAL:
-        1. Explain this diagnosis professionally yet friendly.
-        2. Provide expert agricultural advice.
-        3. LANGUAGE RULE: If this is an Indian crop or if requested, provide the response in a way that respects Hindi/English bilingual needs (Hinglish/Hindi/English).
-        
-        STRICT JSON FORMAT:
-        {
-          "title": "Clear Name of the Disease (in English & Hindi)",
-          "cropName": "Common Name",
-          "cropScientific": "Scientific Name",
-          "status": "healthy/warning/severe/critical",
-          "analysis": {
-            "description": "Conversational explanation (1-2 sentences).",
-            "remedies": "Expert organic & chemical treatments.",
-            "prevention": ["Step 1", "Step 2", "Step 3"],
-            "soilHealth": "Soil & nutrient management advice."
-          }
-        }
-      `;
+You are a professional plant pathologist. Analyze this plant disease and respond with a valid JSON object only (no markdown, no backticks).
 
+Disease/Condition: "${prediction}"
+
+Return this exact JSON structure:
+{
+  "title": "Brief disease title (e.g. 'Tomato Early Blight')",
+  "cropName": "Common crop name (e.g. 'Tomato')",
+  "cropScientific": "Scientific crop name (e.g. 'Solanum lycopersicum')",
+  "status": "one of: healthy, warning, critical, severe, soil",
+  "analysis": {
+    "description": "2-3 sentence description of the disease and its symptoms",
+    "remedies": "Practical treatment steps the farmer can take",
+    "prevention": ["Prevention tip 1", "Prevention tip 2", "Prevention tip 3"],
+    "soilHealth": "Brief soil health recommendation related to this disease"
+  }
+}
+    `.trim();
+
+    console.log("[Analysis] Calling Gemini for expert analysis of:", prediction);
+
+    const ai = new GoogleGenAI({ apiKey });
     const response = await ai.models.generateContent({
-      model: "gemini-3-flash-preview",
+      model: GEMINI_MODEL,
       contents: prompt,
     });
 
+    // response.text is a PROPERTY in @google/genai v1.x (NOT response.text())
     const text = response.text;
+
+    if (!text || text.trim() === "") {
+      console.error("[Analysis] Empty AI response for prediction:", prediction);
+      throw new Error("Empty response from Gemini AI.");
+    }
+
     const cleanJson = text.replace(/```json|```/g, "").trim();
-    return JSON.parse(cleanJson);
+    const parsed = JSON.parse(cleanJson);
+
+    // Validate required fields
+    if (!parsed.title || !parsed.cropName || !parsed.status || !parsed.analysis) {
+      throw new Error("AI response missing required fields.");
+    }
+
+    return parsed;
   } catch (error) {
-    console.error("Gemini AI Error:", error);
+    console.error("[Analysis] getExpertAnalysis failed:", error.message);
+    if (error.stack) console.error(error.stack);
     return null;
   }
 };
 
 /**
- * Plant Disease Analysis Engine
- * 1. Sends image to local Flask model (port 5000/predict).
- * 2. Uses the predicted category to query Gemini for expert solutions.
+ * Plant Disease Analysis Engine:
+ * 1. Sends image to local Flask ML model (port 5000/predict)
+ * 2. Uses the predicted category to query Gemini for expert solutions
  */
 const analyzeImage = async (imagePath) => {
   const modelUrl = process.env.MODEL_URL || "http://localhost:5000/predict";
-  const geminiApiKey = process.env.GEMINI_API_KEY;
   let prediction = "Unknown Issue";
   let confidence = 0;
 
   try {
-    // 1. Call your trained ML Model (DETECT)
+    // Step 1: Call the trained ML model
     const form = new FormData();
     form.append("file", fs.createReadStream(imagePath));
 
+    console.log("[AnalysisService] Calling ML model at:", modelUrl);
     const modelResponse = await axios.post(modelUrl, form, {
       headers: { ...form.getHeaders() },
+      timeout: 30000, // 30 second timeout
     });
 
-    prediction = modelResponse.data.prediction;
-    confidence = modelResponse.data.confidence;
+    console.log("[AnalysisService] Flask Model Response:", modelResponse.data);
+    prediction = modelResponse.data.prediction || "Unknown Issue";
+    confidence = modelResponse.data.confidence || 0;
 
-    // 2. Query Gemini for solutions (SOLVE)
-    if (!geminiApiKey) {
+    // Step 2: Query Gemini for solutions
+    if (!process.env.GEMINI_API_KEY) {
+      console.warn("[AnalysisService] No GEMINI_API_KEY; using fallback diagnosis.");
       return getFallbackDiagnosis(prediction, confidence);
     }
 
-    try {
-      const aiSolutions = await getExpertAnalysis(prediction);
+    const aiSolutions = await getExpertAnalysis(prediction);
 
-      if (!aiSolutions) throw new Error("Invalid AI response");
-
-      return {
-        ...aiSolutions,
-        confidence: Math.round(confidence * 100),
-        predictionRaw: prediction,
-      };
-    } catch (aiError) {
-      console.error("Gemini AI Error:", aiError.message);
+    if (!aiSolutions) {
+      console.warn("[AnalysisService] AI returned null; using fallback.");
       return getFallbackDiagnosis(prediction, confidence);
     }
+
+    return {
+      ...aiSolutions,
+      confidence: isNaN(confidence) ? 0 : Math.min(100, Math.max(0, Math.round(confidence * 100))),
+      predictionRaw: String(prediction || "unknown"),
+    };
 
   } catch (modelError) {
-    console.error("Your Model Error:", modelError.message);
-    return getFallbackDiagnosis("Error in Model Connection", 0);
+    console.error("[AnalysisService] ML Model Error:", modelError.message);
+    return getFallbackDiagnosis("Error connecting to ML model", 0);
   }
 };
 
-const getFallbackDiagnosis = (prediction, confidence) => {
-  return {
-    title: prediction || "Unknown Issue",
-    cropName: "General Plant",
-    cropScientific: "N/A",
-    status: "warning",
-    confidence: Math.round(confidence * 100) || 0,
-    predictionRaw: prediction,
-    analysis: {
-      description: "Dr. Planteinstein is temporarily offline. Please try again later.",
-      remedies: "Please consult a local agricultural expert.",
-      prevention: ["Maintain regular watering", "Ensure good sunlight"],
-      soilHealth: "Test soil pH and nutrients.",
-    },
-  };
-};
+const getFallbackDiagnosis = (prediction, confidence) => ({
+  title: prediction || "Unknown Issue",
+  cropName: "General Plant",
+  cropScientific: "N/A",
+  status: "warning",
+  confidence: Math.round((confidence || 0) * 100),
+  predictionRaw: String(prediction || "unknown"),
+  analysis: {
+    description: "Dr. Planteinstein is temporarily offline. Please try again later.",
+    remedies: "Please consult a local agricultural expert or try again.",
+    prevention: ["Maintain regular watering schedule", "Ensure good sunlight exposure", "Monitor plants daily for early detection"],
+    soilHealth: "Test soil pH and nutrient levels regularly.",
+  },
+});
 
 module.exports = { analyzeImage };
