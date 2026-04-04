@@ -23,7 +23,7 @@ const start = async () => {
     console.log(`
 🌿 ─────────────────────────────────────────────────────────
    Dr. Planteinstein API Server
-   Local Network: http://192.168.17.17:${PORT}/api
+   Local Network: http://192.168.31.68:${PORT}/api
    Localhost: http://localhost:${PORT}
    Environment: ${process.env.NODE_ENV || "development"}
 🌿 ─────────────────────────────────────────────────────────
