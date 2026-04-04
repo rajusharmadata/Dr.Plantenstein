@@ -3,7 +3,7 @@ import { View, Text, StyleSheet, TouchableOpacity, Alert, ActivityIndicator } fr
 import { FontAwesome5 } from "@expo/vector-icons";
 import { COLORS, RADIUS, SPACING } from "../../src/constants/theme";
 import { TYPOGRAPHY } from "../../src/constants/typography";
-import { useRouter } from "expo-router";
+import { useRouter, useLocalSearchParams } from "expo-router";
 import { Button } from "../../src/components/Button";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import * as ImagePicker from "expo-image-picker";
@@ -12,6 +12,7 @@ import { analyzeLeaf } from "../../src/services/api";
 
 export default function ScanScreen() {
   const router = useRouter();
+  const { preselectedUri } = useLocalSearchParams<{ preselectedUri?: string }>();
 
   // Permissions hooks
   const [cameraPermission, requestCameraPermission] = useCameraPermissions();
@@ -30,6 +31,13 @@ export default function ScanScreen() {
       setLocationPermission(status);
     })();
   }, [cameraPermission, requestCameraPermission]);
+
+  // If opened from gallery button on home screen, auto-run analysis
+  useEffect(() => {
+    if (preselectedUri && !isUploading) {
+      runAnalysis(preselectedUri);
+    }
+  }, [preselectedUri]);
 
   const runAnalysis = async (imageUri: string) => {
     setIsUploading(true);

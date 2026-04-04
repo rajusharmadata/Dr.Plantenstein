@@ -14,8 +14,8 @@ const { API_BASE_URL } = (Constants.expoConfig?.extra ?? {}) as {
 
 // `API_BASE_URL` is configurable in `app.json` (Expo "extra" field).
 // This avoids hardcoding `localhost`, which does not work on physical devices.
-const BASE_URL = API_BASE_URL ?? "http://192.168.17.17:3000/api";
-const SERVER_IP = "192.168.17.17:3000";
+const BASE_URL = API_BASE_URL ?? "http://192.168.31.68:3000/api";
+const SERVER_IP = "192.168.31.68:3000";
 
 /**
  * Normalizes image URLs to ensure they are accessible on physical devices.
@@ -314,6 +314,15 @@ export type CommunityPost = {
   likes: string[];
   comments: any[];
   createdAt: string;
+  diagnosis?: {
+    title: string;
+    status: string;
+    confidence: number;
+  };
+  type: "post" | "scan_analysis" | "question";
+  remedy?: string;
+  precaution?: string;
+  authorRole?: string;
 };
 
 /**
@@ -345,11 +354,16 @@ export const createCommunityPost = async (
   content: string,
   category: string,
   imageUris: string[],
-  location?: { latitude: number; longitude: number; address?: string }
+  location?: { latitude: number; longitude: number; address?: string },
+  diagnosis?: { title: string; status: string; confidence: number }
 ): Promise<CommunityPost> => {
   const formData = new FormData();
   formData.append("content", content);
   formData.append("category", category);
+
+  if (diagnosis) {
+    formData.append("diagnosis", JSON.stringify(diagnosis));
+  }
 
   if (location) {
     formData.append("latitude", String(location.latitude));
@@ -386,4 +400,25 @@ export const createCommunityPost = async (
   }
 
   return json.data as CommunityPost;
+};
+/**
+ * Toggle like for a community post.
+ */
+export const togglePostLike = async (postId: string): Promise<{ liked: boolean; count: number }> => {
+  console.log(`[ToggleLike] Attempting to like post: ${postId}`);
+  const response = await fetch(`${BASE_URL}/community/posts/${postId}/toggle-like`, {
+    method: "POST",
+    headers: {
+      Accept: "application/json",
+      ...(await buildAuthHeaders()),
+    } as HeadersInit,
+  });
+  const json = await response.json();
+  console.log(`[ToggleLike] Response:`, json);
+
+  if (!json.success) {
+    throw new Error(json.message || "Failed to toggle like.");
+  }
+
+  return { liked: json.liked, count: json.count };
 };
